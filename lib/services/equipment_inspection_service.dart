@@ -30,6 +30,12 @@ class EquipmentInspectionService {
     if (inspection.result == InspectionResult.failed) {
       await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.repair);
     }
+    else if (inspection.result == InspectionResult.passed) {
+      await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.ready);
+    }
+    else if (inspection.result == InspectionResult.conditionalPass) {
+      await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.ready);
+    }
 
     return docRef;
   }
@@ -88,4 +94,18 @@ class EquipmentInspectionService {
   Future<void> deleteInspection(String inspectionId) async {
     await _firestore.collection('equipment_inspections').doc(inspectionId).delete();
   }
+
+
+  // PRIVATE HILFSMETHODE: Status basierend auf Prüfergebnis bestimmen
+  String _getNewStatusFromResult(InspectionResult result) {
+    switch (result) {
+      case InspectionResult.passed:
+        return 'Einsatzbereit'; // Bestanden = Einsatzbereit
+      case InspectionResult.conditionalPass:
+        return 'Einsatzbereit'; // Bedingt bestanden = auch Einsatzbereit
+      case InspectionResult.failed:
+        return 'In Reparatur'; // Durchgefallen = In Reparatur
+    }
+  }
 }
+

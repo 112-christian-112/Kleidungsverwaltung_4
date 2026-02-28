@@ -9,6 +9,8 @@ import 'package:kleidungsverwaltung_2/screens/admin/equipment/equipment_list_scr
 import 'package:kleidungsverwaltung_2/screens/admin/equipment/equipment_scan_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/admin/equipment/equipment_status_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/admin/equipment/upcoming_inspections_screen.dart';
+import 'package:kleidungsverwaltung_2/screens/all_activities_screen.dart';
+import 'package:kleidungsverwaltung_2/screens/dashboard/dashboard_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/help_support_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/missions/add_missions_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/missions/mission_list_screen.dart';
@@ -127,7 +129,8 @@ routes: {
   '/privacy-policy': (context) => const PrivacyPolicyScreen(),
   '/help-support': (context) => const HelpSupportScreen(),
   '/about': (context) => const AboutScreen(), // Neue Route für die Über-Seite
-  // Diese Seite müsste noch erstellt werden
+  '/all-activities': (context) => const AllActivitiesScreen(),
+'/dashboard': (context) => const DashboardScreen(),
   },
 );
 }

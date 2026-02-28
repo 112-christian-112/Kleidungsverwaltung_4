@@ -2,9 +2,11 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import '../../../Lists/fire_stations.dart';
 import '../../../models/equipment_model.dart';
 import '../../../services/equipment_service.dart';
 import '../../../services/permission_service.dart';
+
 import 'equipment_detail_screen.dart';
 import 'equipment_list_screen.dart';
 
@@ -26,7 +28,9 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
   // Filter
   String _selectedFireStation = 'Alle';
   String _selectedType = 'Alle';
-  late final List<String> _fireStations = ['Alle'];
+
+  // Ortswehren aus Konstanten-Klasse
+  List<String> get _fireStations => ['Alle', ...FireStations.getAllStations()];
   final List<String> _types = ['Alle', 'Jacke', 'Hose'];
 
   @override
@@ -64,8 +68,6 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
           _isLoading = false;
         });
       }
-
-      // Lade die verfügbaren Feuerwehrstationen (nur für Admins relevant)
     } catch (e) {
       print('Fehler beim Laden der Benutzerinformationen: $e');
       if (mounted) {
@@ -75,7 +77,6 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -156,59 +157,68 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
           }
         }
 
+        // Nur Status mit Inhalten anzeigen
+        final nonEmptyStatuses = groupedByStatus.entries
+            .where((entry) => entry.value.isNotEmpty)
+            .toList();
+
         return ListView.builder(
-          itemCount: groupedByStatus.keys.length,
+          itemCount: nonEmptyStatuses.length,
           itemBuilder: (context, index) {
-            final status = EquipmentStatus.values[index];
-            final itemsWithStatus = groupedByStatus[status] ?? [];
+            final statusEntry = nonEmptyStatuses[index];
+            final status = statusEntry.key;
+            final itemsWithStatus = statusEntry.value;
 
-            if (itemsWithStatus.isEmpty) {
-              return const SizedBox.shrink();
-            }
-
-            return ExpansionTile(
-              leading: CircleAvatar(
-                backgroundColor: EquipmentStatus.getStatusColor(status).withOpacity(0.2),
-                child: Icon(
-                  EquipmentStatus.getStatusIcon(status),
-                  color: EquipmentStatus.getStatusColor(status),
-                ),
-              ),
-              title: Text(
-                status,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text('${itemsWithStatus.length} Artikel'),
-              children: [
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: itemsWithStatus.length,
-                  itemBuilder: (context, itemIndex) {
-                    final item = itemsWithStatus[itemIndex];
-                    return ListTile(
-                      leading: Icon(
-                        item.type == 'Jacke'
-                            ? Icons.accessibility_new
-                            : Icons.airline_seat_legroom_normal,
-                        color: item.type == 'Jacke' ? Colors.blue : Colors.orange,
-                      ),
-                      title: Text(item.article),
-                      subtitle: Text('Besitzer: ${item.owner} | Größe: ${item.size}'),
-                      trailing: Text(item.fireStation),
-                      onTap: () {
-                        // Zur Detailseite navigieren
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => EquipmentListScreen(),
+            return Card(
+              margin: const EdgeInsets.all(8.0),
+              child: Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  leading: CircleAvatar(
+                    backgroundColor: EquipmentStatus.getStatusColor(status).withOpacity(0.2),
+                    child: Icon(
+                      EquipmentStatus.getStatusIcon(status),
+                      color: EquipmentStatus.getStatusColor(status),
+                    ),
+                  ),
+                  title: Text(
+                    status,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text('${itemsWithStatus.length} Artikel'),
+                  initiallyExpanded: false,
+                  children: itemsWithStatus.map((item) => ListTile(
+                    leading: Icon(
+                      item.type == 'Jacke'
+                          ? Icons.accessibility_new
+                          : Icons.airline_seat_legroom_normal,
+                      color: item.type == 'Jacke' ? Colors.blue : Colors.orange,
+                    ),
+                    title: Text(item.article),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Besitzer: ${item.owner} | Größe: ${item.size}'),
+                        Text(
+                          'Ortswehr: ${FireStations.getFullName(item.fireStation)}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey,
                           ),
-                        );
-                      },
-                    );
-                  },
+                        ),
+                      ],
+                    ),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => EquipmentDetailScreen(equipment: item),
+                        ),
+                      );
+                    },
+                  )).toList(),
                 ),
-              ],
+              ),
             );
           },
         );
@@ -277,7 +287,6 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
 
   Widget _buildInspectionsTab() {
     final now = DateTime.now();
-    final oneYearAgo = DateTime(now.year - 1, now.month, now.day);
     final thirtyDaysFromNow = now.add(const Duration(days: 30));
 
     return StreamBuilder<List<EquipmentModel>>(
@@ -605,7 +614,7 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Verteilung nach Feuerwehrstationen',
+              'Verteilung nach Ortswehren',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -707,7 +716,6 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
     item.checkDate.isAfter(now) &&
         item.checkDate.isBefore(now.add(const Duration(days: 30))))
         .length;
-    final okCount = equipmentList.length - overdueCount - upcomingCount;
 
     // Durchschnittliche Waschzyklen
     final totalWashCycles = equipmentList.fold(0, (sum, item) => sum + item.washCycles);
@@ -885,6 +893,13 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
               'Prüfdatum: ${DateFormat('dd.MM.yyyy').format(equipment.checkDate)}',
               style: TextStyle(color: timeColor, fontWeight: FontWeight.bold),
             ),
+            Text(
+              'Ortswehr: ${FireStations.getFullName(equipment.fireStation)}',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.grey,
+              ),
+            ),
           ],
         ),
         trailing: Text(
@@ -895,7 +910,6 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
           ),
         ),
         onTap: () {
-          // Navigation zur Prüfungsseite
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -915,14 +929,15 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           title: const Text('Filter'),
-          content: SingleChildScrollView(
+          content: SizedBox(
+            width: double.maxFinite,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Feuerwehrstation-Filter (nur für Admins)
                 if (_isAdmin) ...[
-                  const Text('Feuerwehrstation'),
+                  const Text('Ortswehr'),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     value: _selectedFireStation,
@@ -934,7 +949,26 @@ class _EquipmentStatusScreenState extends State<EquipmentStatusScreen> with Sing
                     items: _fireStations.map((String station) {
                       return DropdownMenuItem<String>(
                         value: station,
-                        child: Text(station),
+                        child: Row(
+                          children: [
+                            if (station != 'Alle') ...[
+                              Icon(
+                                FireStations.getIcon(station),
+                                size: 16,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Expanded(
+                              child: Text(
+                                station == 'Alle'
+                                    ? station
+                                    : station,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     }).toList(),
                     onChanged: (String? newValue) {

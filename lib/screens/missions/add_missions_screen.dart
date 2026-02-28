@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../Lists/fire_stations.dart';
+import '../../Lists/mission_keywords.dart';
 import '../../models/mission_model.dart';
 import '../../services/mission_service.dart';
 import '../../services/permission_service.dart';
+import '../../widgets/fire_station_selector.dart';
 import 'select_equipment_screen.dart';
 
 class AddMissionScreen extends StatefulWidget {
@@ -20,32 +23,21 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
   final MissionService _missionService = MissionService();
   final PermissionService _permissionService = PermissionService();
 
-  final TextEditingController _nameController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _startTimeController = TextEditingController();
 
   DateTime _startTime = DateTime.now();
   String _missionType = 'fire';
+  String _selectedKeyword = ''; // Neues Feld für Einsatzstichwort
   String _fireStation = '';
   List<String> _selectedEquipmentIds = [];
-  List<String> _selectedFireStations = []; // NEU: Liste der ausgewählten Ortswehren
+  List<String> _selectedFireStations = [];
   bool _isLoading = false;
-  bool _isAdmin = false; // NEU: Admin-Status für erweiterte Berechtigungen
+  bool _isAdmin = false;
 
-  final List<String> _fireStations = [
-    'Esklum',
-    'Breinermoor',
-    'Grotegaste',
-    'Flachsmeer',
-    'Folmhusen',
-    'Großwolde',
-    'Ihrhove',
-    'Steenfelde',
-    'Völlen',
-    'Völlenerfehn',
-    'Völlenerkönigsfehn'
-  ];
+  // Ortswehren-Liste aus Konstanten-Klasse entfernt
+  // Wird jetzt über FireStations.getAllStations() abgerufen
 
   @override
   void initState() {
@@ -61,13 +53,11 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
 
     try {
       final userFireStation = await _permissionService.getUserFireStation();
-      final isAdmin = await _permissionService.isAdmin(); // NEU: Admin-Status laden
+      final isAdmin = await _permissionService.isAdmin();
 
       setState(() {
         _fireStation = userFireStation;
-        _isAdmin = isAdmin; // NEU: Admin-Status speichern
-
-        // Die eigene Feuerwehr ist immer beteiligt
+        _isAdmin = isAdmin;
         _selectedFireStations = [userFireStation];
         _isLoading = false;
       });
@@ -81,11 +71,23 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
     _locationController.dispose();
     _descriptionController.dispose();
     _startTimeController.dispose();
     super.dispose();
+  }
+
+  // Einsatzstichwörter für den aktuellen Typ abrufen - jetzt aus der Konstanten-Klasse
+  List<String> _getKeywordsForType(String type) {
+    return MissionKeywords.getKeywordsForType(type);
+  }
+
+  // Beim Wechsel des Einsatztyps das Stichwort zurücksetzen
+  void _onMissionTypeChanged(String newType) {
+    setState(() {
+      _missionType = newType;
+      _selectedKeyword = ''; // Stichwort zurücksetzen
+    });
   }
 
   Future<void> _selectStartTime() async {
@@ -135,86 +137,21 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
     }
   }
 
-  // NEU: Dialog zur Auswahl beteiligter Ortswehren anzeigen
   Future<void> _selectInvolvedFireStations() async {
-    final List<String> tempSelectedStations = List.from(_selectedFireStations);
-
-    await showDialog(
+    final result = await showFireStationSelector(
       context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-            builder: (context, setState) {
-              return AlertDialog(
-                title: const Text('Beteiligte Ortswehren'),
-                content: Container(
-                  width: double.maxFinite,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Wählen Sie die am Einsatz beteiligten Ortswehren aus:',
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      const SizedBox(height: 16),
-                      Flexible(
-                        child: SingleChildScrollView(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: _fireStations.map((station) {
-                              final isSelected = tempSelectedStations.contains(station);
-                              final isOwnStation = station == _fireStation;
-
-                              return CheckboxListTile(
-                                title: Text(station),
-                                value: isSelected,
-                                // Die eigene Feuerwehr kann nicht abgewählt werden
-                                onChanged: isOwnStation ? null : (bool? value) {
-                                  setState(() {
-                                    if (value == true) {
-                                      tempSelectedStations.add(station);
-                                    } else {
-                                      tempSelectedStations.remove(station);
-                                    }
-                                  });
-                                },
-                                // Eigene Feuerwehr hervorheben
-                                subtitle: isOwnStation
-                                    ? const Text('Eigene Feuerwehr',
-                                    style: TextStyle(
-                                      fontStyle: FontStyle.italic,
-                                      fontSize: 12,
-                                    ))
-                                    : null,
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    child: const Text('Abbrechen'),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      this.setState(() {
-                        _selectedFireStations = tempSelectedStations;
-                      });
-                      Navigator.of(context).pop();
-                    },
-                    child: const Text('Übernehmen'),
-                  ),
-                ],
-              );
-            }
-        );
-      },
+      selectedStations: _selectedFireStations,
+      userFireStation: _fireStation,
+      title: 'Beteiligte Ortswehren',
+      helpText: 'Wählen Sie die am Einsatz beteiligten Ortswehren aus:',
+      showFullNames: true,
     );
+
+    if (result != null) {
+      setState(() {
+        _selectedFireStations = result;
+      });
+    }
   }
 
   Future<void> _saveMission() async {
@@ -235,16 +172,21 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
             .get();
         Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
 
+        // Einsatzname aus Stichwort generieren
+        String missionName = _selectedKeyword.isNotEmpty
+            ? _selectedKeyword
+            : 'Einsatz ohne Stichwort';
+
         MissionModel mission = MissionModel(
           id: '',
-          name: _nameController.text.trim(),
+          name: missionName, // Verwende das ausgewählte Stichwort als Name
           startTime: _startTime,
           type: _missionType,
           location: _locationController.text.trim(),
           description: _descriptionController.text.trim(),
           equipmentIds: _selectedEquipmentIds,
           fireStation: _fireStation,
-          involvedFireStations: _selectedFireStations, // NEU: Beteiligte Ortswehren
+          involvedFireStations: _selectedFireStations,
           createdBy: userData['name'] ?? currentUser.email ?? '',
           createdAt: DateTime.now(),
         );
@@ -317,43 +259,65 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Name/Beschreibung
-                      TextFormField(
-                        controller: _nameController,
+                      // Einsatztyp (zuerst, damit Stichwörter aktualisiert werden)
+                      DropdownButtonFormField<String>(
                         decoration: const InputDecoration(
-                          labelText: 'Einsatzname',
+                          labelText: 'Einsatztyp',
                           border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.category),
                         ),
+                        value: _missionType,
+                        items: MissionKeywords.getAllTypes().map((type) {
+                          return _buildDropdownItem(
+                              type,
+                              MissionKeywords.getTypeName(type),
+                              MissionKeywords.getTypeIcon(type)
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          if (newValue != null) {
+                            _onMissionTypeChanged(newValue);
+                          }
+                        },
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Bitte geben Sie einen Einsatznamen ein';
+                            return 'Bitte wählen Sie einen Einsatztyp aus';
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 16),
 
-                      // Einsatztyp
+                      // Einsatzstichwort (neues Feld)
                       DropdownButtonFormField<String>(
                         decoration: const InputDecoration(
-                          labelText: 'Einsatztyp',
+                          labelText: 'Einsatzstichwort',
                           border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.label),
+                          helperText: 'Wählen Sie das passende Einsatzstichwort aus',
                         ),
-                        value: _missionType,
-                        items: [
-                          _buildDropdownItem('fire', 'Brandeinsatz', Icons.local_fire_department),
-                          _buildDropdownItem('technical', 'Technische Hilfeleistung', Icons.build),
-                          _buildDropdownItem('hazmat', 'Gefahrgut', Icons.dangerous),
-                          _buildDropdownItem('water', 'Wasser/Hochwasser', Icons.water),
-                          _buildDropdownItem('training', 'Übung', Icons.school),
-                          _buildDropdownItem('other', 'Sonstiger Einsatz', Icons.more_horiz),
-                        ],
+                        value: _selectedKeyword.isEmpty ? null : _selectedKeyword,
+                        hint: const Text('Bitte Einsatzstichwort auswählen'),
+                        isExpanded: true,
+                        items: _getKeywordsForType(_missionType).map((String keyword) {
+                          return DropdownMenuItem<String>(
+                            value: keyword,
+                            child: Text(
+                              keyword,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
                         onChanged: (String? newValue) {
-                          if (newValue != null) {
-                            setState(() {
-                              _missionType = newValue;
-                            });
+                          setState(() {
+                            _selectedKeyword = newValue ?? '';
+                          });
+                        },
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Bitte wählen Sie ein Einsatzstichwort aus';
                           }
+                          return null;
                         },
                       ),
                       const SizedBox(height: 16),
@@ -364,6 +328,8 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Einsatzort',
                           border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.location_on),
+                          helperText: 'z.B. Hauptstraße 123, Ihrhove',
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
@@ -402,6 +368,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                           labelText: 'Einsatzzeitpunkt',
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.access_time),
+                          helperText: 'Tippen Sie hier, um Datum und Uhrzeit zu ändern',
                         ),
                         onTap: _selectStartTime,
                         validator: (value) {
@@ -417,7 +384,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
               ),
               const SizedBox(height: 16),
 
-              // NEUE KARTE: Beteiligte Ortswehren
+              // Beteiligte Ortswehren
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -433,7 +400,6 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Beteiligte Ortswehren anzeigen und auswählen
                       InkWell(
                         onTap: _selectInvolvedFireStations,
                         child: InputDecorator(
@@ -441,6 +407,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                             labelText: 'Beteiligte Ortswehren',
                             border: OutlineInputBorder(),
                             prefixIcon: Icon(Icons.fire_truck),
+                            helperText: 'Tippen Sie hier, um weitere Ortswehren hinzuzufügen',
                           ),
                           child: Row(
                             children: [
@@ -486,8 +453,8 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Ausrüstung auswählen
                       ListTile(
+                        leading: const Icon(Icons.inventory_2),
                         title: const Text('Verwendete Ausrüstung'),
                         subtitle: Text(
                           _selectedEquipmentIds.isEmpty
@@ -498,6 +465,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                           onPressed: _selectEquipment,
                           child: const Text('Auswählen'),
                         ),
+                        contentPadding: EdgeInsets.zero,
                       ),
                     ],
                   ),
@@ -513,7 +481,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Einsatzbeschreibung',
+                        'Zusätzliche Informationen',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -526,9 +494,11 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Beschreibung (optional)',
                           border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.description),
                           alignLabelWithHint: true,
+                          helperText: 'Weitere Details zum Einsatz',
                         ),
-                        maxLines: 5,
+                        maxLines: 4,
                       ),
                     ],
                   ),
@@ -540,14 +510,36 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
               // Speichern-Button
               SizedBox(
                 width: double.infinity,
-                height: 50,
+                height: 56,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _saveMission,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 2,
+                  ),
                   child: _isLoading
-                      ? const CircularProgressIndicator()
-                      : const Text(
-                    'Einsatz speichern',
-                    style: TextStyle(fontSize: 16),
+                      ? const SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                      : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.save, size: 24),
+                      SizedBox(width: 12),
+                      Text(
+                        'Einsatz speichern',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
                 ),
               ),

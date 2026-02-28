@@ -1,8 +1,7 @@
-// 1. Zuerst erstellen wir einen Bearbeitungsbildschirm für die Einsatzkleidung
 // screens/admin/equipment/edit_equipment_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../Lists/fire_stations.dart';
 import '../../../models/equipment_model.dart';
 import '../../../services/equipment_service.dart';
 import '../../../services/permission_service.dart';
@@ -41,27 +40,18 @@ class _EditEquipmentScreenState extends State<EditEquipmentScreen> {
   // Datum
   late DateTime _checkDate;
 
-  // Listen für Dropdown-Menüs
+  // Listen für Dropdown-Menüs (jetzt aus Konstanten)
   final List<String> _articles = [
     'Viking Performer Evolution Einsatzjacke AGT',
-    'Viking Performer Evolution Einsatzhose AGT'
+    'Viking Performer Evolution Einsatzhose AGT',
+    'Viking Einsatzhose TH Assistance',
+    'Viking Einsatzjacke TH Assistance'
   ];
 
   final List<String> _types = ['Jacke', 'Hose'];
 
-  final List<String> _fireStations = [
-    'Esklum',
-    'Breinermoor',
-    'Grotegaste',
-    'Flachsmeer',
-    'Folmhusen',
-    'Großwolde',
-    'Ihrhove',
-    'Steenfelde',
-    'Völlen',
-    'Völlenerfehn',
-    'Völlenerkönigsfehn'
-  ];
+  // Ortswehren aus Konstanten-Klasse
+  List<String> get _fireStations => FireStations.getAllStations();
 
   @override
   void initState() {
@@ -350,12 +340,13 @@ class _EditEquipmentScreenState extends State<EditEquipmentScreen> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Ortsfeuerwehr
+                      // Ortsfeuerwehr (jetzt aus Konstanten)
                       DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Ortsfeuerwehr',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.location_city),
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.location_city),
+                          helperText: 'Ortswehr: ${FireStations.getFullName(_fireStation)}',
                         ),
                         value: _fireStation,
                         items: _fireStations.map((String station) {
@@ -371,12 +362,7 @@ class _EditEquipmentScreenState extends State<EditEquipmentScreen> {
                             });
                           }
                         },
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Bitte wählen Sie eine Ortsfeuerwehr aus';
-                          }
-                          return null;
-                        },
+                        validator: FireStations.validateStation,
                       ),
                       const SizedBox(height: 16),
 

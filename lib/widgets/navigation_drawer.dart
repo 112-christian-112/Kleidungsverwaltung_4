@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/admin/equipment/upcoming_inspections_screen.dart';
 import '../screens/dashboard/dashboard_screen.dart';
 import '../services/auth_service.dart';
+import '../services/permission_service.dart'; // Verwende den Permission Service
 import '../screens/admin/equipment/equipment_list_screen.dart';
 
 class AppNavigationDrawer extends StatefulWidget {
@@ -17,6 +18,8 @@ class AppNavigationDrawer extends StatefulWidget {
 class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final PermissionService _permissionService = PermissionService();
+
   String _userName = '';
   String _userRole = '';
   String _userFireStation = '';
@@ -37,20 +40,30 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
     try {
       User? user = _auth.currentUser;
       if (user != null) {
+        // Lade Benutzerdaten
         DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
 
         if (userDoc.exists) {
           Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
 
+          // Verwende den PermissionService für Admin-Überprüfung
+          final isAdmin = await _permissionService.isAdmin();
+
           setState(() {
             _userName = userData['name'] ?? '';
             _userRole = userData['role'] ?? '';
             _userFireStation = userData['fireStation'] ?? '';
-            // Hier definieren wir, welche Rollen Admin-Rechte haben
-            _isAdmin = _userRole == 'Gemeindebrandmeister' ||
-                _userRole == 'Stv. Gemeindebrandmeister' ||
-                _userRole == 'Gemeindezeugwart';
+            _isAdmin = isAdmin;
           });
+
+          // Debug-Ausgabe
+          print('=== Navigation Drawer User Data ===');
+          print('User Name: $_userName');
+          print('User Role: $_userRole');
+          print('Fire Station: $_userFireStation');
+          print('Is Admin: $_isAdmin');
+          print('Raw userData: $userData');
+          print('=====================================');
         }
       }
     } catch (e) {
@@ -79,7 +92,21 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
           children: [
             UserAccountsDrawerHeader(
               accountName: Text(_userName.isNotEmpty ? _userName : 'Benutzer'),
-              accountEmail: Text(userEmail),
+              accountEmail: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(userEmail),
+                  if (_userRole.isNotEmpty)
+                    Text(
+                      _userRole,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
+              ),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: Theme.of(context).colorScheme.primary,
                 child: Text(
@@ -104,15 +131,13 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                       ),
                     ),
                   ),
-                if (_userRole.isNotEmpty)
+                if (_isAdmin)
                   Tooltip(
-                    message: _userRole,
+                    message: 'Administrator',
                     child: CircleAvatar(
-                      backgroundColor: _isAdmin
-                          ? Colors.orange
-                          : Theme.of(context).colorScheme.tertiary,
-                      child: Icon(
-                        _isAdmin ? Icons.admin_panel_settings : Icons.person,
+                      backgroundColor: Colors.orange,
+                      child: const Icon(
+                        Icons.admin_panel_settings,
                         size: 18,
                         color: Colors.white,
                       ),
@@ -123,15 +148,17 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 color: Theme.of(context).colorScheme.primaryContainer,
               ),
             ),
+
+            // Hauptnavigation
             ListTile(
-              leading: const Icon(Icons.dashboard),
-              title: const Text('Dashboard'),
+              leading: const Icon(Icons.home),
+              title: const Text('Startseite'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushReplacementNamed(context, '/home');
               },
             ),
-            // Einsatzkleidung für alle Benutzer
+
             ListTile(
               leading: const Icon(Icons.security),
               title: const Text('Einsatzkleidung'),
@@ -145,6 +172,7 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 );
               },
             ),
+
             ListTile(
               leading: const Icon(Icons.event_note),
               title: const Text('Anstehende Prüfungen'),
@@ -158,6 +186,7 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 );
               },
             ),
+
             ListTile(
               leading: const Icon(Icons.assignment),
               title: const Text('Einsätze'),
@@ -166,6 +195,7 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 Navigator.pushNamed(context, '/missions');
               },
             ),
+
             ListTile(
               leading: const Icon(Icons.dashboard),
               title: const Text('Dashboard'),
@@ -180,21 +210,27 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
               },
             ),
 
-            // Admin-Bereich nur für Administratoren anzeigen
+            // Admin-Bereich
             if (_isAdmin) ...[
               const Divider(),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                child: Text(
-                  'Administration',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                  ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.admin_panel_settings, size: 16, color: Colors.orange),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Administration',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.admin_panel_settings),
+                leading: const Icon(Icons.people, color: Colors.orange),
                 title: const Text('Benutzer-Verwaltung'),
                 onTap: () {
                   Navigator.pop(context);
@@ -202,7 +238,41 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 },
               ),
             ],
+
+            // Debug-Sektion (nur in Development)
+            if (_isAdmin) ...[
+              const Divider(),
+              ExpansionTile(
+                leading: const Icon(Icons.bug_report, size: 20),
+                title: const Text(
+                  'Debug-Info',
+                  style: TextStyle(fontSize: 14),
+                ),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Name: $_userName', style: const TextStyle(fontSize: 12)),
+                        Text('Rolle: $_userRole', style: const TextStyle(fontSize: 12)),
+                        Text('Feuerwehr: $_userFireStation', style: const TextStyle(fontSize: 12)),
+                        Text('Admin: $_isAdmin', style: const TextStyle(fontSize: 12)),
+                        const SizedBox(height: 8),
+                        ElevatedButton(
+                          onPressed: _loadUserData,
+                          child: const Text('Daten neu laden'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
             const Divider(),
+
+            // Einstellungen und weitere Optionen
             ListTile(
               leading: const Icon(Icons.settings),
               title: const Text('Einstellungen'),
@@ -211,6 +281,7 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 Navigator.pushNamed(context, '/settings');
               },
             ),
+
             ListTile(
               leading: const Icon(Icons.info),
               title: const Text('Über'),
@@ -219,7 +290,9 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 Navigator.pushNamed(context, '/about');
               },
             ),
+
             const Divider(),
+
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Abmelden'),

@@ -18,8 +18,15 @@ class MissionListScreen extends StatefulWidget {
 class _MissionListScreenState extends State<MissionListScreen> {
   final MissionService _missionService = MissionService();
   final PermissionService _permissionService = PermissionService();
+
+  // Berechtigungsstatus
   bool _isAdmin = false;
+  bool _isHygieneUnit = false;
+  bool _canViewAllMissions = false;
+  bool _canEditMissions = false;
+  String _userRole = 'user';
   String _userFireStation = '';
+
   bool _isLoading = true;
   String _searchQuery = '';
   String? _filterType;
@@ -37,11 +44,19 @@ class _MissionListScreenState extends State<MissionListScreen> {
 
     try {
       final isAdmin = await _permissionService.isAdmin();
+      final isHygieneUnit = await _permissionService.isHygieneUnit();
+      final canViewAllMissions = await _permissionService.canViewAllMissions();
+      final canEditMissions = await _permissionService.canEditMissions();
+      final userRole = await _permissionService.getUserRole();
       final userFireStation = await _permissionService.getUserFireStation();
 
       if (mounted) {
         setState(() {
           _isAdmin = isAdmin;
+          _isHygieneUnit = isHygieneUnit;
+          _canViewAllMissions = canViewAllMissions;
+          _canEditMissions = canEditMissions;
+          _userRole = userRole;
           _userFireStation = userFireStation;
           _isLoading = false;
         });
@@ -60,7 +75,30 @@ class _MissionListScreenState extends State<MissionListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Einsätze'),
+        title: Row(
+          children: [
+            const Text('Einsätze'),
+            if (_isHygieneUnit && !_isAdmin) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange),
+                ),
+                child: const Text(
+                  'Hygieneeinheit',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.filter_list),
@@ -73,6 +111,35 @@ class _MissionListScreenState extends State<MissionListScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
         children: [
+          // Berechtigung-Info für Hygieneeinheit
+          if (_isHygieneUnit && !_isAdmin)
+            Container(
+              margin: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Hygieneeinheit-Ansicht: Sie können alle Einsätze einsehen',
+                      style: TextStyle(
+                        color: Colors.blue.shade700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // Suchfeld
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -93,11 +160,50 @@ class _MissionListScreenState extends State<MissionListScreen> {
             ),
           ),
 
+          // Statistik-Banner für erweiterte Berechtigungen
+          if (_canViewAllMissions)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                    Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isAdmin ? Icons.admin_panel_settings : Icons.local_laundry_service,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _isAdmin
+                          ? 'Administrator-Ansicht: Alle Einsätze aller Ortswehren'
+                          : 'Hygieneeinheit-Ansicht: Alle Einsätze aller Ortswehren',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           Expanded(
             child: StreamBuilder<List<MissionModel>>(
-              stream: _isAdmin
-                  ? _missionService.getAllMissions()
-                  : _missionService.getMissionsByFireStation(_userFireStation),
+              stream: _missionService.getMissionsForCurrentUser(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -105,16 +211,72 @@ class _MissionListScreenState extends State<MissionListScreen> {
 
                 if (snapshot.hasError) {
                   return Center(
-                    child: Text(
-                      'Fehler beim Laden der Daten: ${snapshot.error}',
-                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 64,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Fehler beim Laden der Daten',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${snapshot.error}',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
 
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(
-                    child: Text('Keine Einsätze vorhanden'),
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.assignment_outlined,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Keine Einsätze vorhanden',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _canViewAllMissions
+                                ? 'Es wurden noch keine Einsätze erfasst'
+                                : 'Ihre Ortswehr war noch bei keinem Einsatz beteiligt',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                 }
 
@@ -137,8 +299,33 @@ class _MissionListScreenState extends State<MissionListScreen> {
                 }
 
                 if (missionList.isEmpty) {
-                  return const Center(
-                    child: Text('Keine passenden Einsätze gefunden'),
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.search_off,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Keine passenden Einsätze gefunden',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Versuchen Sie andere Suchbegriffe oder Filter',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
                   );
                 }
 
@@ -172,7 +359,7 @@ class _MissionListScreenState extends State<MissionListScreen> {
                         typeIcon = Icons.school;
                         typeColor = Colors.green;
                         break;
-                      default: // Handles 'other' and any unexpected values
+                      default:
                         typeIcon = Icons.more_horiz;
                         typeColor = Colors.grey;
                         break;
@@ -181,6 +368,10 @@ class _MissionListScreenState extends State<MissionListScreen> {
                     final formattedDate = DateFormat('dd.MM.yyyy').format(mission.startTime);
                     final formattedTime = DateFormat('HH:mm').format(mission.startTime);
 
+                    // Prüfen ob die aktuelle Feuerwehr nur beteiligt oder Hauptfeuerwehr ist
+                    final bool isMainFireStation = mission.fireStation == _userFireStation;
+                    final bool isInvolvedFireStation = mission.involvedFireStations.contains(_userFireStation);
+
                     return Card(
                       margin: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
                       child: ListTile(
@@ -188,9 +379,77 @@ class _MissionListScreenState extends State<MissionListScreen> {
                           backgroundColor: typeColor.withOpacity(0.2),
                           child: Icon(typeIcon, color: typeColor),
                         ),
-                        title: Text(mission.name),
-                        subtitle: Text('$formattedDate um $formattedTime Uhr\n${mission.location}'),
-                        isThreeLine: true,
+                        title: Row(
+                          children: [
+                            Expanded(child: Text(mission.name)),
+                            // Kennzeichnung für beteiligte vs. Hauptfeuerwehr (nur für normale Benutzer relevant)
+                            if (!_canViewAllMissions && !isMainFireStation && isInvolvedFireStation)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'Beteiligt',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            // Berechtigung-Indikator für Hygieneeinheit
+                            if (_isHygieneUnit && !_isAdmin)
+                              Container(
+                                margin: const EdgeInsets.only(left: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                ),
+                                child: const Icon(
+                                  Icons.visibility,
+                                  size: 12,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$formattedDate um $formattedTime Uhr\n${mission.location}'),
+                            // Zeige beteiligte Feuerwehren an, wenn mehr als eine (für erweiterte Rechte)
+                            if (_canViewAllMissions && mission.involvedFireStations.length > 1)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Beteiligte: ${mission.involvedFireStations.join(', ')}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context).colorScheme.secondary,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                            // Hauptfeuerwehr anzeigen (für erweiterte Rechte)
+                            if (_canViewAllMissions)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  'Hauptfeuerwehr: ${mission.fireStation}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        isThreeLine: _canViewAllMissions || mission.involvedFireStations.length > 1,
                         trailing: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -324,6 +583,41 @@ class _MissionListScreenState extends State<MissionListScreen> {
                   ),
                 ],
               ),
+
+              // Zusätzliche Info für erweiterte Berechtigungen
+              if (_canViewAllMissions) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _isAdmin ? Icons.admin_panel_settings : Icons.local_laundry_service,
+                        color: Colors.blue.shade700,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _isAdmin
+                              ? 'Sie sehen alle Einsätze aller Ortswehren'
+                              : 'Als Hygieneeinheit sehen Sie alle Einsätze',
+                          style: TextStyle(
+                            color: Colors.blue.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
           actions: [

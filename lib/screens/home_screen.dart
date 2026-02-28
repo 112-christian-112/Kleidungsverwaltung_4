@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../widgets/navigation_drawer.dart';
+import '../widgets/recent_activities_widget.dart';
 import '../services/auth_service.dart';
 import '../services/equipment_service.dart';
 import '../services/permission_service.dart';
@@ -58,7 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final userFireStation = await _permissionService.getUserFireStation();
 
         // Benutzerrolle aus Firestore abrufen
-        var userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        var userDoc = await FirebaseFirestore.instance.collection('users').doc(
+            user.uid).get();
         String role = userDoc.exists ? (userDoc.data()?['role'] ?? '') : '';
         String name = userDoc.exists ? (userDoc.data()?['name'] ?? '') : '';
 
@@ -185,16 +187,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 24),
 
-              // Kürzliche Aktivitäten
-              _buildRecentActivities(),
+              // Kürzliche Aktivitäten - ersetzt durch das neue Widget
+              _buildRecentActivitiesSection(),
 
               const SizedBox(height: 16),
-
-              // Dashboard-Kacheln für zusätzliche Funktionen
-              DashboardTilesWidget(
-                isAdmin: _isAdmin,
-                userFireStation: _userFireStation,
-              ),
             ],
           ),
         ),
@@ -204,7 +200,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildWelcomeCard() {
     // Aktuelle Tageszeit ermitteln
-    final hour = DateTime.now().hour;
+    final hour = DateTime
+        .now()
+        .hour;
     String greeting;
 
     if (hour < 12) {
@@ -229,8 +227,15 @@ class _HomeScreenState extends State<HomeScreen> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Theme.of(context).colorScheme.primary,
-              Theme.of(context).colorScheme.primary.withOpacity(0.7),
+              Theme
+                  .of(context)
+                  .colorScheme
+                  .primary,
+              Theme
+                  .of(context)
+                  .colorScheme
+                  .primary
+                  .withOpacity(0.7),
             ],
           ),
         ),
@@ -258,7 +263,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -284,7 +290,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    DateFormat('EEEE, dd. MMMM yyyy', 'de_DE').format(DateTime.now()),
+                    DateFormat('EEEE, dd. MMMM yyyy', 'de_DE').format(
+                        DateTime.now()),
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.white.withOpacity(0.8),
@@ -301,7 +308,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Theme
+                      .of(context)
+                      .colorScheme
+                      .primary,
                 ),
               ),
             ),
@@ -341,17 +351,22 @@ class _HomeScreenState extends State<HomeScreen> {
             scrollDirection: Axis.horizontal,
             children: [
               _buildSimpleStatCard(
-                title: 'Überfällige\nPrüfungen', // Zeilenumbruch für lange Wörter
+                title: 'Überfällige\nPrüfungen',
+                // Zeilenumbruch für lange Wörter
                 value: _overdueCount.toString(),
                 icon: Icons.warning,
                 iconColor: Colors.red,
-                onTap: () => Navigator.pushNamed(context, '/overdue-inspections'),
+                onTap: () =>
+                    Navigator.pushNamed(context, '/overdue-inspections'),
               ),
               _buildSimpleStatCard(
                 title: 'Ausrüstungsteile',
                 value: _totalEquipment.toString(),
                 icon: Icons.inventory_2,
-                iconColor: Theme.of(context).colorScheme.primary,
+                iconColor: Theme
+                    .of(context)
+                    .colorScheme
+                    .primary,
                 onTap: () => Navigator.pushNamed(context, '/admin-equipment'),
               ),
               _buildSimpleStatCard(
@@ -373,7 +388,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               _buildSimpleStatCard(
-                title: 'Einsätze\n(30 Tage)', // Zeilenumbruch für besseres Layout
+                title: 'Einsätze\n(30 Tage)',
+                // Zeilenumbruch für besseres Layout
                 value: _recentMissionsCount.toString(),
                 icon: Icons.local_fire_department,
                 iconColor: Colors.deepOrange,
@@ -408,7 +424,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
-              mainAxisSize: MainAxisSize.min, // Wichtig für korrekte Größenanpassung
+              mainAxisSize: MainAxisSize.min,
+              // Wichtig für korrekte Größenanpassung
               children: [
                 Icon(
                   icon,
@@ -430,7 +447,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    color: Theme.of(context).colorScheme.secondary,
+                    color: Theme
+                        .of(context)
+                        .colorScheme
+                        .secondary,
                   ),
                   maxLines: 2,
                 ),
@@ -464,7 +484,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: 'Ausrüstung\nscannen', // Zeilenumbruch
                     icon: Icons.qr_code_scanner,
                     color: Colors.purple,
-                    onTap: () => Navigator.pushNamed(context, '/equipment-scan'),
+                    onTap: () =>
+                        Navigator.pushNamed(context, '/equipment-scan'),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -483,10 +504,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Expanded(
                   child: _buildSimpleActionButton(
-                    title: 'Ausrüstungs-\nliste', // Zeilenumbruch mit Bindestrich
+                    title: 'Ausrüstungs-\nliste',
+                    // Zeilenumbruch mit Bindestrich
                     icon: Icons.list,
                     color: Colors.green,
-                    onTap: () => Navigator.pushNamed(context, '/admin-equipment'),
+                    onTap: () =>
+                        Navigator.pushNamed(context, '/admin-equipment'),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -498,6 +521,32 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => Navigator.pushNamed(context, '/dashboard'),
                   ),
                 ),
+
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSimpleActionButton(
+                    title: 'Überfällige-\nPrüfungen',
+                    // Zeilenumbruch mit Bindestrich
+                    icon: Icons.list,
+                    color: Colors.green,
+                    onTap: () =>
+                        Navigator.pushNamed(context, '/admin-equipment'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildSimpleActionButton(
+                    title: 'Statusübersicht',
+                    icon: Icons.dashboard,
+                    color: Colors.blue,
+                    onTap: () => Navigator.pushNamed(context, '/equipment-status'),
+                  ),
+                ),
+
               ],
             ),
           ],
@@ -524,7 +573,8 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           child: Column(
-            mainAxisSize: MainAxisSize.min, // Wichtig für korrekte Größenanpassung
+            mainAxisSize: MainAxisSize.min,
+            // Wichtig für korrekte Größenanpassung
             children: [
               Icon(
                 icon,
@@ -548,8 +598,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRecentActivities() {
-    // Diese Funktion könnte mit echten Daten aus Firebase gefüllt werden
+  Widget _buildRecentActivitiesSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -563,89 +612,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            if (_isAdmin)
-              TextButton(
-                onPressed: () {
-                  // Zur vollständigen Aktivitätenliste navigieren
-                },
-                child: const Text('Alle anzeigen'),
-              ),
+            TextButton(
+              onPressed: () {
+                Navigator.pushNamed(context, '/all-activities');
+              },
+              child: const Text('Alle anzeigen'),
+            ),
           ],
         ),
         const SizedBox(height: 8),
-        Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: 3, // Begrenzt auf 3 Einträge
-            separatorBuilder: (context, index) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              // Beispielaktivitäten - später mit echten Daten ersetzen
-              List<Map<String, dynamic>> activities = [
-                {
-                  'title': 'Neue Prüfung durchgeführt',
-                  'description': 'Einsatzjacke von Max Mustermann geprüft',
-                  'time': '15 Minuten',
-                  'icon': Icons.check_circle,
-                  'color': Colors.green,
-                },
-                {
-                  'title': 'Status geändert',
-                  'description': 'Einsatzhose in Reinigung gesendet',
-                  'time': '2 Stunden',
-                  'icon': Icons.local_laundry_service,
-                  'color': Colors.blue,
-                },
-                {
-                  'title': 'Neuer Einsatz angelegt',
-                  'description': 'Brandeinsatz in Ihrhove hinzugefügt',
-                  'time': '1 Tag',
-                  'icon': Icons.local_fire_department,
-                  'color': Colors.red,
-                },
-              ];
-
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: activities[index]['color'].withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    activities[index]['icon'],
-                    color: activities[index]['color'],
-                  ),
-                ),
-                title: Text(
-                  activities[index]['title'],
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(activities[index]['description']),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'vor ${activities[index]['time']}',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.secondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right, size: 16),
-                  ],
-                ),
-                onTap: () {
-                  // Zur Detailansicht navigieren
-                },
-              );
-            },
-          ),
+        // Das finale RecentActivitiesWidget verwenden
+        const RecentActivitiesWidget(
+          limit: 3,
         ),
       ],
     );

@@ -15,6 +15,9 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
   String _nfcId = '';
   bool _nfcAvailable = false;
   String _errorMessage = '';
+  bool _sessionActive = false;
+  bool _continuousMode = true;
+  Timer? _resetTimer;
 
   @override
   void initState() {
@@ -24,6 +27,8 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
 
   @override
   void dispose() {
+    // Timer stoppen
+    _resetTimer?.cancel();
     // NFC-Session stoppen, wenn Screen verlassen wird
     _stopNfcSession();
     super.dispose();
@@ -39,7 +44,7 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
           _errorMessage = 'NFC ist auf diesem Gerät nicht verfügbar.';
           _isScanning = false;
         } else {
-          _startNfcSession();
+          _startContinuousNfcSession();
         }
       });
     } catch (e) {
@@ -51,110 +56,148 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
     }
   }
 
-  // NFC-Session starten
-  void _startNfcSession() {
+  // Kontinuierliche NFC-Session - wird nur einmal gestartet
+  void _startContinuousNfcSession() {
+    if (_sessionActive) return;
+
     setState(() {
       _isScanning = true;
       _nfcId = '';
       _errorMessage = '';
+      _sessionActive = true;
     });
 
-    // NFC-Session starten
+    // Einmalige Session die kontinuierlich läuft
     NfcManager.instance.startSession(
       onDiscovered: (NfcTag tag) async {
         try {
-          // NFC-Tag-ID extrahieren
-          var tagId = '';
-
-          // NDEF-Format (häufigster Typ für NFC-Tags)
-          if (tag.data.containsKey('ndef')) {
-            final ndefTag = tag.data['ndef']['identifier'];
-            if (ndefTag != null) {
-              tagId = _bytesToHex(ndefTag);
-            }
-          }
-          // NFC-A (ISO 14443-3A)
-          else if (tag.data.containsKey('nfca')) {
-            final nfcA = tag.data['nfca']['identifier'];
-            if (nfcA != null) {
-              tagId = _bytesToHex(nfcA);
-            }
-          }
-          // NFC-B (ISO 14443-3B)
-          else if (tag.data.containsKey('nfcb')) {
-            final nfcB = tag.data['nfcb']['applicationData'];
-            if (nfcB != null) {
-              tagId = _bytesToHex(nfcB);
-            }
-          }
-          // NFC-F (JIS 6319-4)
-          else if (tag.data.containsKey('nfcf')) {
-            final nfcF = tag.data['nfcf']['identifier'];
-            if (nfcF != null) {
-              tagId = _bytesToHex(nfcF);
-            }
-          }
-          // NFC-V (ISO 15693)
-          else if (tag.data.containsKey('nfcv')) {
-            final nfcV = tag.data['nfcv']['identifier'];
-            if (nfcV != null) {
-              tagId = _bytesToHex(nfcV);
-            }
-          }
-          // Fallback: Irgendwelche vorhandenen ID-Daten verwenden
-          else {
-            final keys = tag.data.keys.toList();
-            if (keys.isNotEmpty && tag.data[keys[0]] != null && tag.data[keys[0]]['identifier'] != null) {
-              tagId = _bytesToHex(tag.data[keys[0]]['identifier']);
-            }
-          }
+          // Tag-ID extrahieren ohne Session zu stoppen
+          var tagId = _extractTagIdFast(tag);
 
           if (tagId.isNotEmpty) {
-            // NFC-Session stoppen
-            await NfcManager.instance.stopSession();
-
-            setState(() {
-              _nfcId = tagId;
-              _isScanning = false;
-            });
+            // UI aktualisieren aber Session NICHT stoppen
+            if (mounted) {
+              setState(() {
+                _nfcId = tagId;
+                _isScanning = false;
+              });
+            }
           } else {
-            setState(() {
-              _errorMessage = 'Konnte keine Tag-ID lesen. Bitte versuchen Sie es erneut.';
-            });
-            // Session fortsetzen für einen neuen Versuch
+            if (mounted) {
+              setState(() {
+                _errorMessage = 'Konnte keine Tag-ID lesen. Bitte versuchen Sie es erneut.';
+              });
+              // Fehler nach 2 Sekunden zurücksetzen
+              _resetTimer?.cancel();
+              _resetTimer = Timer(const Duration(seconds: 2), () {
+                if (mounted) {
+                  setState(() {
+                    _errorMessage = '';
+                    _isScanning = true;
+                  });
+                }
+              });
+            }
           }
         } catch (e) {
-          setState(() {
-            _errorMessage = 'Fehler beim Lesen des NFC-Tags: $e';
-          });
-          await NfcManager.instance.stopSession();
-          setState(() {
-            _isScanning = false;
-          });
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'Fehler beim Lesen des NFC-Tags: $e';
+            });
+            // Fehler nach 3 Sekunden zurücksetzen
+            _resetTimer?.cancel();
+            _resetTimer = Timer(const Duration(seconds: 3), () {
+              if (mounted) {
+                setState(() {
+                  _errorMessage = '';
+                  _isScanning = true;
+                });
+              }
+            });
+          }
         }
       },
       onError: (error) async {
-        // Session stoppen
-        try {
-          await NfcManager.instance.stopSession();
-        } catch (e) {
-          print('Fehler beim Stoppen der NFC-Session nach Fehler: $e');
-        }
-
         if (mounted) {
           setState(() {
             _errorMessage = 'NFC-Fehler: $error';
-            _isScanning = false;
+            _sessionActive = false;
           });
         }
-        return; // Explizites Return zur Fehlerbehandlung
+      },
+      // Erweiterte Polling-Optionen für bessere Kontrolle
+      pollingOptions: {
+        NfcPollingOption.iso14443,
+        NfcPollingOption.iso15693,
+        NfcPollingOption.iso18092,
       },
     );
+  }
+
+  // Optimierte Tag-ID-Extraktion für schnellere Verarbeitung
+  String _extractTagIdFast(NfcTag tag) {
+    try {
+      // Direkter Zugriff auf die häufigsten Tag-Typen für maximale Geschwindigkeit
+
+      // NFC-A (ISO 14443-3A) - häufigster Typ zuerst
+      if (tag.data.containsKey('nfca')) {
+        final nfcA = tag.data['nfca']['identifier'];
+        if (nfcA != null) {
+          return _bytesToHex(nfcA);
+        }
+      }
+
+      // NDEF-Format
+      if (tag.data.containsKey('ndef')) {
+        final ndefTag = tag.data['ndef']['identifier'];
+        if (ndefTag != null) {
+          return _bytesToHex(ndefTag);
+        }
+      }
+
+      // NFC-B (ISO 14443-3B)
+      if (tag.data.containsKey('nfcb')) {
+        final nfcB = tag.data['nfcb']['applicationData'];
+        if (nfcB != null) {
+          return _bytesToHex(nfcB);
+        }
+      }
+
+      // NFC-F (JIS 6319-4)
+      if (tag.data.containsKey('nfcf')) {
+        final nfcF = tag.data['nfcf']['identifier'];
+        if (nfcF != null) {
+          return _bytesToHex(nfcF);
+        }
+      }
+
+      // NFC-V (ISO 15693)
+      if (tag.data.containsKey('nfcv')) {
+        final nfcV = tag.data['nfcv']['identifier'];
+        if (nfcV != null) {
+          return _bytesToHex(nfcV);
+        }
+      }
+
+      // Schneller Fallback ohne aufwendige Suche
+      for (final key in tag.data.keys) {
+        final tagData = tag.data[key];
+        if (tagData != null && tagData['identifier'] != null) {
+          return _bytesToHex(tagData['identifier']);
+        }
+      }
+    } catch (e) {
+      print('Fehler bei schneller Tag-ID-Extraktion: $e');
+    }
+
+    return '';
   }
 
   // NFC-Session stoppen
   Future<void> _stopNfcSession() async {
     try {
+      _resetTimer?.cancel();
+      _sessionActive = false;
       await NfcManager.instance.stopSession();
     } catch (e) {
       // Fehler beim Stoppen ignorieren
@@ -162,14 +205,38 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
     }
   }
 
-  // Bytes in Hex-String umwandeln
+  // Optimierte Bytes-zu-Hex Konvertierung
   String _bytesToHex(List<int> bytes) {
-    return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+    if (bytes.isEmpty) return '';
+
+    // Direkte String-Erstellung für bessere Performance
+    final buffer = StringBuffer();
+    for (int i = 0; i < bytes.length; i++) {
+      if (i > 0) buffer.write(':');
+      buffer.write(bytes[i].toRadixString(16).padLeft(2, '0').toUpperCase());
+    }
+    return buffer.toString();
   }
 
-  void _resetScan() {
+  // Für neuen Scan - Session läuft weiter, nur UI wird zurückgesetzt
+  void _resetForNewScan() {
+    _resetTimer?.cancel();
+    setState(() {
+      _isScanning = true;
+      _nfcId = '';
+      _errorMessage = '';
+    });
+    // Session läuft kontinuierlich weiter - keine neue Meldung!
+  }
+
+  // Komplett neustarten (falls Session Probleme hat)
+  void _restartSession() {
     _stopNfcSession().then((_) {
-      _startNfcSession();
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) {
+          _startContinuousNfcSession();
+        }
+      });
     });
   }
 
@@ -178,6 +245,46 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('NFC-Tag scannen'),
+        actions: [
+          // Toggle für kontinuierlichen Modus
+          IconButton(
+            icon: Icon(_continuousMode ? Icons.loop : Icons.loop_outlined),
+            onPressed: () {
+              setState(() {
+                _continuousMode = !_continuousMode;
+              });
+              if (_continuousMode && !_sessionActive) {
+                _startContinuousNfcSession();
+              }
+            },
+          ),
+          // Info-Button für Benutzerhinweise
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('NFC-Scan Hinweise'),
+                  content: const Text(
+                      'Optimierter Scan-Modus:\n\n'
+                          '• Die erste Android-Meldung erscheint beim App-Start\n'
+                          '• Weitere Scans erfolgen OHNE neue Meldungen\n'
+                          '• Halten Sie das NFC-Tag fest an die Rückseite\n'
+                          '• Der kontinuierliche Modus ist standardmäßig aktiviert\n'
+                          '• Bei Problemen: Loop-Symbol zum Neustarten antippen'
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Center(
         child: Padding(
@@ -185,17 +292,65 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Status-Indikator
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _sessionActive ? Colors.green[100] : Colors.red[100],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _sessionActive ? Colors.green : Colors.red,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _sessionActive ? Icons.wifi_tethering : Icons.wifi_tethering_off,
+                      size: 16,
+                      color: _sessionActive ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _sessionActive ? 'NFC Session aktiv' : 'NFC Session gestoppt',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _sessionActive ? Colors.green[800] : Colors.red[800],
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
               if (_isScanning && _nfcAvailable)
                 Column(
                   children: [
-                    const Icon(
-                      Icons.nfc,
-                      size: 80,
-                      color: Colors.blue,
+                    // Animierte NFC-Icon
+                    TweenAnimationBuilder(
+                      tween: Tween<double>(begin: 0.8, end: 1.2),
+                      duration: const Duration(seconds: 1),
+                      builder: (context, double scale, child) {
+                        return Transform.scale(
+                          scale: scale,
+                          child: const Icon(
+                            Icons.nfc,
+                            size: 80,
+                            color: Colors.blue,
+                          ),
+                        );
+                      },
+                      onEnd: () {
+                        // Animation wiederholen während des Scannens
+                        if (_isScanning && mounted) {
+                          setState(() {});
+                        }
+                      },
                     ),
                     const SizedBox(height: 24),
                     const Text(
-                      'NFC-Tag scannen',
+                      'Bereit zum Scannen',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -204,8 +359,20 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Bitte halten Sie den NFC-Tag an die Rückseite Ihres Smartphones',
+                      'Halten Sie den NFC-Tag an die Rückseite Ihres Smartphones',
                       style: TextStyle(fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _continuousMode
+                          ? 'Kontinuierlicher Scan-Modus: Keine weiteren Meldungen'
+                          : 'Einzelscan-Modus: Android-Meldung kann erscheinen',
+                      style: TextStyle(
+                          fontSize: 14,
+                          color: _continuousMode ? Colors.green[600] : Colors.orange[600],
+                          fontStyle: FontStyle.italic
+                      ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 24),
@@ -222,7 +389,7 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                     ),
                     const SizedBox(height: 24),
                     const Text(
-                      'NFC-Tag erkannt',
+                      'NFC-Tag erfolgreich erkannt',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -230,22 +397,43 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      'NFC-ID: $_nfcId',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
                       ),
-                      textAlign: TextAlign.center,
+                      child: Column(
+                        children: [
+                          const Text(
+                            'NFC-ID:',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(
+                            _nfcId,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 32),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         ElevatedButton.icon(
-                          onPressed: _resetScan,
+                          onPressed: _resetForNewScan,
                           icon: const Icon(Icons.refresh),
-                          label: const Text('Neu scannen'),
+                          label: const Text('Weiter scannen'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.orange,
                             foregroundColor: Colors.white,
@@ -270,13 +458,13 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                   Column(
                     children: [
                       const Icon(
-                        Icons.error_outline,
+                        Icons.warning_amber_outlined,
                         size: 80,
-                        color: Colors.red,
+                        color: Colors.orange,
                       ),
                       const SizedBox(height: 24),
                       const Text(
-                        'Fehler beim NFC-Scan',
+                        'Scan-Problem',
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -284,9 +472,26 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        _errorMessage,
-                        style: const TextStyle(fontSize: 16),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Text(
+                          _errorMessage,
+                          style: const TextStyle(fontSize: 16),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Versuchen Sie es erneut oder starten Sie die Session neu',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey,
+                        ),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 32),
@@ -295,9 +500,9 @@ class _NfcScannerScreenState extends State<NfcScannerScreen> {
                         children: [
                           if (_nfcAvailable)
                             ElevatedButton.icon(
-                              onPressed: _resetScan,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Erneut versuchen'),
+                              onPressed: _restartSession,
+                              icon: const Icon(Icons.restart_alt),
+                              label: const Text('Session neustarten'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.blue,
                                 foregroundColor: Colors.white,
