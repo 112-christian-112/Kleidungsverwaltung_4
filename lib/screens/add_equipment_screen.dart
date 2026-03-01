@@ -71,7 +71,7 @@ class _AddEquipmentScreenState extends State<AddEquipmentScreen> with TickerProv
     'Folmhusen',
     'Großwolde',
     'Ihrhove',
-    'Ihren'
+    'Ihren',
     'Steenfelde',
     'Völlen',
     'Völlenerfehn',
