@@ -73,11 +73,7 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen>
 
         final users = snapshot.data ?? [];
         final filteredUsers = users
-            .where((user) =>
-                user.isApproved == isApproved &&
-                user.name.isNotEmpty &&
-                user.role.isNotEmpty &&
-                user.fireStation.isNotEmpty)
+            .where((user) => user.isApproved == isApproved)
             .toList();
 
         if (filteredUsers.isEmpty) {
@@ -116,10 +112,9 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildInfoRow('Name', user.name),
-                        _buildInfoRow('E-Mail', user.email),
-                        _buildInfoRow('Rolle', user.role),
-                        _buildInfoRow('Ortsfeuerwehr', user.fireStation),
+                        _buildInfoRow('Name', user.name.isNotEmpty ? user.name : '⏳ Noch nicht ausgefüllt'),
+                        _buildInfoRow('Rolle', user.role.isNotEmpty ? user.role : '⏳ Noch nicht ausgefüllt'),
+                        _buildInfoRow('Ortswehr', user.fireStation.isNotEmpty ? user.fireStation : '⏳ Noch nicht ausgefüllt'),
                         _buildInfoRow(
                           'Registriert am',
                           '${user.createdAt.day}.${user.createdAt.month}.${user.createdAt.year}',
@@ -131,8 +126,10 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen>
                           ),
                         const SizedBox(height: 16),
                         // ── Aktionsbuttons ───────────────────────────────
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.end,
                           children: [
                             // Freigeben (nur wenn noch nicht freigegeben)
                             if (!isApproved) ...[

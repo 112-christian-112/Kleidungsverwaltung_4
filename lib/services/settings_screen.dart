@@ -360,12 +360,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                   ),
                   ListTile(
-                    title: const Text('Abmelden'),
-                    subtitle: const Text('Von diesem Gerät abmelden'),
                     leading: const Icon(Icons.logout),
+                    title: const Text('Abmelden'),
                     onTap: () async {
                       await _authService.signOut();
-                      // Navigation erfolgt automatisch durch den StreamBuilder in main.dart
+                      // StreamBuilder übernimmt automatisch
                     },
                   ),
                 ],

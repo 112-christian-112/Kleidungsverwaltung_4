@@ -1,6 +1,7 @@
-// screens/register_screen.dart
+// lib/screens/register_screen.dart
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/profile_completetion_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -20,57 +21,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final AuthService _authService = AuthService();
 
   Future<void> _register() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = '';
-      });
+    if (!_formKey.currentState!.validate()) return;
 
-      try {
-        await _authService.registerWithEmailAndPassword(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      await _authService.registerWithEmailAndPassword(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+
+      // Explizit navigieren — nicht auf StreamBuilder warten.
+      // Das Firestore-Dokument und der Auth-Event treffen gleichzeitig
+      // ein und würden eine Race Condition im StreamBuilder verursachen.
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const ProfileCompletionScreen()),
+          (route) => false,
         );
-
-        // Nach erfolgreicher Registrierung
-        if (mounted) {
-          // Zeige Dialog mit Erfolgsmeldung
-          await showDialog(
-            context: context,
-            barrierDismissible: false, // Dialog kann nicht durch Tippen außerhalb geschlossen werden
-            builder: (BuildContext context) {
-              return AlertDialog(
-                title: const Text('Registrierung erfolgreich'),
-                content: const Text(
-                  'Ihre Registrierung war erfolgreich. Sie müssen jetzt Ihr Profil vervollständigen und warten bis ein Administrator Ihr Konto freischaltet.',
-                  style: TextStyle(fontSize: 16),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    child: const Text('Verstanden'),
-                  ),
-                ],
-              );
-            },
-          );
-        }
-
-        // Navigation erfolgt automatisch über den StreamBuilder in main.dart
-      } catch (e) {
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          _errorMessage = e.toString().contains('firebase')
+          _errorMessage = e.toString().contains('firebase') ||
+                  e.toString().contains('Firebase')
               ? 'Fehler bei der Registrierung. Versuchen Sie es mit einer anderen E-Mail-Adresse.'
-              : e.toString();
+              : e.toString().replaceFirst('Exception: ', '');
+          _isLoading = false;
         });
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
       }
     }
   }
@@ -87,7 +68,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Registrierung'),
+        title: const Text('Registrieren'),
       ),
       body: SafeArea(
         child: Center(
@@ -100,17 +81,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Neues Konto erstellen',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    'Konto erstellen',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Nach der Registrierung vervollständigen Sie Ihr Profil und warten auf Admin-Freigabe.',
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
+
+                  // E-Mail
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: 'E-Mail',
                       border: OutlineInputBorder(),
@@ -118,16 +105,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Bitte geben Sie eine E-Mail-Adresse ein';
+                        return 'Bitte geben Sie Ihre E-Mail-Adresse ein';
                       }
-                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                          .hasMatch(value)) {
+                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
                         return 'Bitte geben Sie eine gültige E-Mail-Adresse ein';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
+
+                  // Passwort
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
@@ -147,6 +135,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
+
+                  // Passwort bestätigen
                   TextFormField(
                     controller: _confirmPasswordController,
                     obscureText: true,
@@ -160,40 +150,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         return 'Bitte bestätigen Sie Ihr Passwort';
                       }
                       if (value != _passwordController.text) {
-                        return 'Passwörter stimmen nicht überein';
+                        return 'Die Passwörter stimmen nicht überein';
                       }
                       return null;
                     },
                   ),
+                  const SizedBox(height: 24),
+
+                  // Fehlermeldung
                   if (_errorMessage.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16.0),
-                      child: Text(
-                        _errorMessage,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: Colors.red.shade700, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage,
+                              style: TextStyle(color: Colors.red.shade700),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  const SizedBox(height: 24),
+
+                  // Registrieren-Button
                   ElevatedButton(
                     onPressed: _isLoading ? null : _register,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     child: _isLoading
-                        ? const CircularProgressIndicator()
-                        : const Text(
-                      'Registrieren',
-                      style: TextStyle(fontSize: 16),
-                    ),
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Registrieren',
+                            style: TextStyle(fontSize: 16)),
                   ),
                   const SizedBox(height: 16),
+
                   TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
-                    child: const Text('Bereits registriert? Jetzt anmelden'),
+                    onPressed: _isLoading ? null : () => Navigator.pop(context),
+                    child: const Text('Bereits ein Konto? Anmelden'),
                   ),
                 ],
               ),

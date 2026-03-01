@@ -304,15 +304,15 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
 
             const Divider(),
 
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Abmelden'),
-              onTap: () async {
-                Navigator.pop(context);
-                await AuthService().signOut();
-                // Navigation erfolgt automatisch durch den StreamBuilder in main.dart
-              },
-            ),
+    ListTile(
+    leading: const Icon(Icons.logout),
+    title: const Text('Abmelden'),
+    onTap: () async {
+    Navigator.pop(context); // Drawer schließen
+    await AuthService().signOut();
+    // StreamBuilder übernimmt automatisch → LoginScreen
+    },
+    ),
           ],
         ),
       ),

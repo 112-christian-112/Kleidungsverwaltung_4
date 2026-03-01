@@ -159,25 +159,49 @@ class _AddEquipmentToMissionNfcScreenState
 
   String _extractNfcId(NfcTag tag) {
     try {
-      final ndef = tag.data['ndef'];
-      if (ndef != null) {
-        final records = ndef['cachedMessage']?['records'] as List?;
-        if (records != null && records.isNotEmpty) {
-          final payload = records.first['payload'] as List<int>?;
-          if (payload != null && payload.length > 3) {
-            return String.fromCharCodes(payload.sublist(3));
-          }
-        }
+      // NFC-A (häufigster Typ)
+      if (tag.data.containsKey('nfca')) {
+        final id = tag.data['nfca']['identifier'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
       }
-      final nfcA = tag.data['nfca'];
-      if (nfcA != null) {
-        final id = nfcA['identifier'] as List<int>?;
-        if (id != null) {
-          return id.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
-        }
+      // NDEF - aber NUR die Hardware-UID, NICHT den Payload!
+      if (tag.data.containsKey('ndef')) {
+        final id = tag.data['ndef']['identifier'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
+      }
+      // NFC-B
+      if (tag.data.containsKey('nfcb')) {
+        final id = tag.data['nfcb']['applicationData'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
+      }
+      // NFC-F
+      if (tag.data.containsKey('nfcf')) {
+        final id = tag.data['nfcf']['identifier'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
+      }
+      // NFC-V
+      if (tag.data.containsKey('nfcv')) {
+        final id = tag.data['nfcv']['identifier'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
+      }
+      // Generischer Fallback
+      for (final key in tag.data.keys) {
+        final id = tag.data[key]?['identifier'] as List<int>?;
+        if (id != null) return _bytesToHex(id);
       }
     } catch (_) {}
     return '';
+  }
+
+// Hilfsmethode hinzufügen (identisch zum Admin-Screen)
+  String _bytesToHex(List<int> bytes) {
+    if (bytes.isEmpty) return '';
+    final buffer = StringBuffer();
+    for (int i = 0; i < bytes.length; i++) {
+      if (i > 0) buffer.write(':');
+      buffer.write(bytes[i].toRadixString(16).padLeft(2, '0').toUpperCase());
+    }
+    return buffer.toString();
   }
 
   Future<void> _processNfcTag(String tagId) async {

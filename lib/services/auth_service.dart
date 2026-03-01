@@ -51,42 +51,27 @@ class AuthService {
   }
 
   // Prüfen ob Benutzer in Firestore existiert und freigegeben ist
-  Future<Map<String, dynamic>> checkUserStatus(String userId) async {
-    try {
-      DocumentSnapshot userDoc = await _firestore.collection('users').doc(userId).get();
-
-      if (!userDoc.exists) {
+    Stream<Map<String, dynamic>> watchUserStatus(String userId) {
+      return _firestore
+          .collection('users')
+          .doc(userId)
+          .snapshots()
+          .map((doc) {
+        if (!doc.exists) {
+          return {'exists': false, 'isApproved': false, 'isProfileComplete': false};
+        }
+        final data = doc.data() as Map<String, dynamic>;
+        final isProfileComplete =
+            (data['name'] as String? ?? '').isNotEmpty &&
+                (data['role'] as String? ?? '').isNotEmpty &&
+                (data['fireStation'] as String? ?? '').isNotEmpty;
         return {
-          'exists': false,
-          'isApproved': false,
-          'isProfileComplete': false
+          'exists': true,
+          'isApproved': data['isApproved'] ?? false,
+          'isProfileComplete': isProfileComplete,
         };
-      }
-
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-
-      bool isProfileComplete =
-          userData['name'] != null &&
-              userData['name'].isNotEmpty &&
-              userData['role'] != null &&
-              userData['role'].isNotEmpty &&
-              userData['fireStation'] != null &&
-              userData['fireStation'].isNotEmpty;
-
-      return {
-        'exists': true,
-        'isApproved': userData['isApproved'] ?? false,
-        'isProfileComplete': isProfileComplete
-      };
-    } catch (e) {
-      print('Fehler beim Prüfen des Benutzerstatus: $e');
-      return {
-        'exists': false,
-        'isApproved': false,
-        'isProfileComplete': false
-      };
+      });
     }
-  }
 
   // Benutzerprofil aktualisieren
   Future<void> updateUserProfile(

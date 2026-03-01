@@ -1,4 +1,4 @@
-// Aktualisierte main.dart
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -26,112 +26,165 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/register_screen.dart';
 import 'services/auth_service.dart';
-import 'services/firestore_service.dart';
 
 void main() async {
-WidgetsFlutterBinding.ensureInitialized();
-await Firebase.initializeApp(
-options: DefaultFirebaseOptions.currentPlatform,
-);
-// Theme Service initialisieren
-final themeService = ThemeService();
-await themeService.initialize();
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialisiere die Datums-Formatierung für Deutsch
-  await initializeDateFormatting('de_DE', '');
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
-  // Optional: Setze Deutsch als Standardsprache für die App
+  // Theme Service initialisieren
+  final themeService = ThemeService();
+  await themeService.initialize();
+
+  // Datums-Formatierung für Deutsch
+  await initializeDateFormatting('de_DE', '');
   Intl.defaultLocale = 'de_DE';
 
-runApp(
-ChangeNotifierProvider.value(
-value: themeService,
-child: const MyApp(),
-),
-);
+  runApp(
+    ChangeNotifierProvider.value(
+      value: themeService,
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
-const MyApp({Key? key}) : super(key: key);
+  const MyApp({Key? key}) : super(key: key);
 
-@override
-Widget build(BuildContext context) {
-final themeService = Provider.of<ThemeService>(context);
+  @override
+  Widget build(BuildContext context) {
+    final themeService = Provider.of<ThemeService>(context);
 
-return MaterialApp(
-title: 'Firebase App',
-debugShowCheckedModeBanner: false,
-theme: themeService.getLightTheme(),
-darkTheme: themeService.getDarkTheme(),
-themeMode: themeService.getThemeMode(),
-home: StreamBuilder<User?>(
-  stream: FirebaseAuth.instance.authStateChanges(),
-  builder: (context, snapshot) {
-    if (snapshot.connectionState == ConnectionState.waiting) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    return MaterialApp(
+      title: 'Einsatzkleidung',
+      debugShowCheckedModeBanner: false,
+      theme: themeService.getLightTheme(),
+      darkTheme: themeService.getDarkTheme(),
+      themeMode: themeService.getThemeMode(),
 
-    if (snapshot.hasData) {
-      // Wenn der Benutzer angemeldet ist, prüfen wir seinen Status
-      return FutureBuilder<Map<String, dynamic>>(
-        future: AuthService().checkUserStatus(snapshot.data!.uid),
-        builder: (context, statusSnapshot) {
-          if (statusSnapshot.connectionState == ConnectionState.waiting) {
+      // ── Auth-Gate ───────────────────────────────────────────────────────
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, authSnapshot) {
+          // Firebase noch nicht bereit
+          if (authSnapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
-              body: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 24),
-                    Text('Benutzerstatus wird geprüft...'),
-                  ],
-                ),
-              ),
+              body: Center(child: CircularProgressIndicator()),
             );
           }
 
-          // Wenn der Benutzer nicht existiert oder das Profil nicht vollständig ist
-          if (!statusSnapshot.data?['exists'] || !statusSnapshot.data?['isProfileComplete']) {
-            return const ProfileCompletionScreen();
+          // Kein User angemeldet → Login
+          if (!authSnapshot.hasData) {
+            return const LoginScreen();
           }
 
-          // Wenn der Benutzer nicht freigegeben ist
-          if (!statusSnapshot.data?['isApproved']) {
-            return const PendingApprovalScreen();
-          }
+          final uid = authSnapshot.data!.uid;
 
-          // Wenn der Benutzer existiert und freigegeben ist
-          return const HomeScreen();
+          // User angemeldet → Live-Listener auf Firestore-Dokument.
+          // Reagiert sofort wenn Admin isApproved setzt oder Profil
+          // vervollständigt wird — kein manuelles Refresh nötig.
+          return StreamBuilder<Map<String, dynamic>>(
+            key: ValueKey(uid), // Neu bauen bei jedem User-Wechsel
+            stream: AuthService().watchUserStatus(uid),
+            builder: (context, statusSnapshot) {
+              // Firestore noch nicht geantwortet
+              if (statusSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 24),
+                        Text('Benutzerstatus wird geprüft...'),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              // Verbindungsfehler (z.B. offline)
+              if (statusSnapshot.hasError) {
+                return Scaffold(
+                  body: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.wifi_off,
+                              size: 64, color: Colors.grey),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Verbindungsfehler',
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${statusSnapshot.error}',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            onPressed: () => AuthService().signOut(),
+                            child: const Text('Abmelden und neu versuchen'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              final status = statusSnapshot.data ?? {
+                'exists': false,
+                'isApproved': false,
+                'isProfileComplete': false,
+              };
+
+              // Profil nicht vollständig → Profil-Screen
+              if (!status['exists'] || !status['isProfileComplete']) {
+                return const ProfileCompletionScreen();
+              }
+
+              // Warten auf Admin-Freigabe → Pending-Screen
+              // (wird automatisch verlassen sobald Admin freigibt)
+              if (!status['isApproved']) {
+                return const PendingApprovalScreen();
+              }
+
+              // Alles OK → Home
+              return const HomeScreen();
+            },
+          );
         },
-      );
-    }
+      ),
 
-    // Wenn kein Benutzer angemeldet ist
-    return const LoginScreen();
-  },
-),
-routes: {
-'/login': (context) => const LoginScreen(),
-'/register': (context) => const RegisterScreen(),
-'/home': (context) => const HomeScreen(),
-'/settings': (context) => const SettingsScreen(),
-'/profile-completion': (context) => const ProfileCompletionScreen(),
-'/pending-approval': (context) => const PendingApprovalScreen(),
-'/admin-users': (context) => const AdminUserApprovalScreen(),
-  '/admin-equipment': (context) => const EquipmentListScreen(),
-  '/equipment-scan': (context) => const EquipmentScanScreen(), // Diese Seite müsste noch erstellt werden
-  '/overdue-inspections': (context) => const UpcomingInspectionsScreen(),
-  '/equipment-status': (context) => const EquipmentStatusScreen(),
-  '/missions': (context) => const MissionListScreen(),
-  '/add-mission': (context) => const AddMissionScreen(),
-  '/privacy-policy': (context) => const PrivacyPolicyScreen(),
-  '/help-support': (context) => const HelpSupportScreen(),
-  '/about': (context) => const AboutScreen(), // Neue Route für die Über-Seite
-  '/all-activities': (context) => const AllActivitiesScreen(),
-'/dashboard': (context) => const DashboardScreen(),
-  },
-);
-}
+      // ── Benannte Routen ─────────────────────────────────────────────────
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
+        '/home': (context) => const HomeScreen(),
+        '/settings': (context) => const SettingsScreen(),
+        '/profile-completion': (context) => const ProfileCompletionScreen(),
+        '/pending-approval': (context) => const PendingApprovalScreen(),
+        '/admin-users': (context) => const AdminUserApprovalScreen(),
+        '/admin-equipment': (context) => const EquipmentListScreen(),
+        '/equipment-scan': (context) => const EquipmentScanScreen(),
+        '/overdue-inspections': (context) => const UpcomingInspectionsScreen(),
+        '/equipment-status': (context) => const EquipmentStatusScreen(),
+        '/missions': (context) => const MissionListScreen(),
+        '/add-mission': (context) => const AddMissionScreen(),
+        '/privacy-policy': (context) => const PrivacyPolicyScreen(),
+        '/help-support': (context) => const HelpSupportScreen(),
+        '/about': (context) => const AboutScreen(),
+        '/all-activities': (context) => const AllActivitiesScreen(),
+        '/dashboard': (context) => const DashboardScreen(),
+      },
+    );
+  }
 }

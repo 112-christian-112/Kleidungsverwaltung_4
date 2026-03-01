@@ -119,9 +119,13 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Einsatzkleidung'),
         actions: [
+// home_screen.dart AppBar-Button
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: _authService.signOut,
+            onPressed: () async {
+              await _authService.signOut();
+              // StreamBuilder übernimmt automatisch
+            },
             tooltip: 'Abmelden',
           ),
         ],
@@ -510,7 +514,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       if (_canAddMission)
         _QuickAction(
-          label: 'Einsatz\nerfassen',
+          label: 'Einsatz erfassen',
           icon: Icons.add_circle_outline,
           color: Colors.red.shade700,
           onTap: () => Navigator.push(context,
@@ -535,7 +539,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisCount: 3,
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
-          childAspectRatio: 1.0,
+          childAspectRatio: 0.9,
         ),
         itemCount: actions.length,
         itemBuilder: (_, i) => _buildActionTile(actions[i]),
@@ -552,26 +556,27 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: action.onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(8),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: action.color.withOpacity(0.12),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(action.icon, color: action.color, size: 24),
+                child: Icon(action.icon, color: action.color, size: 22),
               ),
               const SizedBox(height: 8),
               Text(
                 action.label,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
+                    fontSize: 11, fontWeight: FontWeight.w600),
                 maxLines: 2,
+                  overflow: TextOverflow.ellipsis
               ),
             ],
           ),
