@@ -1,18 +1,22 @@
-// screens/profile_completion_screen.dart
+// lib/services/profile_completetion_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../Lists/fire_stations.dart';
 import '../services/auth_service.dart';
+import '../services/pending_approval_screen.dart';
 
 class ProfileCompletionScreen extends StatefulWidget {
   const ProfileCompletionScreen({Key? key}) : super(key: key);
 
   @override
-  State<ProfileCompletionScreen> createState() => _ProfileCompletionScreenState();
+  State<ProfileCompletionScreen> createState() =>
+      _ProfileCompletionScreenState();
 }
 
 class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final AuthService _authService = AuthService();
 
   String _selectedRole = '';
   String _selectedFireStation = '';
@@ -25,104 +29,14 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
     'Gemeindebrandmeister',
     'Stv. Gemeindebrandmeister',
     'Wäscherei',
-    'Gemeindezeugwart'
+    'Gemeindezeugwart',
   ];
-
-  final List<String> _fireStations = [
-    'Esklum',
-    'Breinermoor',
-    'Grotegaste',
-    'Flachsmeer',
-    'Folmhusen',
-    'Großwolde',
-    'Ihrhove',
-    'Steenfelde',
-    'Völlen',
-    'Völlenerfehn',
-    'Völlenerkönigsfehn'
-  ];
-
-  final AuthService _authService = AuthService();
 
   @override
   void initState() {
     super.initState();
     _selectedRole = _roles.first;
-    _selectedFireStation = _fireStations.first;
-  }
-
-  Future<void> _completeProfile() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
-
-      try {
-        User? currentUser = _authService.currentUser;
-
-        if (currentUser != null) {
-          await _authService.updateUserProfile(
-              currentUser.uid,
-              _nameController.text.trim(),
-              _selectedRole,
-              _selectedFireStation
-          );
-
-          if (mounted) {
-            // Zeige Dialog mit Erfolgsmeldung
-            await showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (BuildContext context) {
-                return AlertDialog(
-                  title: const Text('Profil erfolgreich vervollständigt'),
-                  content: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Ihr Profil wurde erfolgreich vervollständigt.',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'Bitte warten Sie auf die Freigabe durch einen Administrator. Sie erhalten eine Benachrichtigung, sobald Ihr Konto freigeschaltet wurde.',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text('Verstanden'),
-                    ),
-                  ],
-                );
-              },
-            );
-
-            Navigator.pushReplacementNamed(context, '/pending-approval');
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Fehler: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }
-    }
+    _selectedFireStation = FireStations.all.first;
   }
 
   @override
@@ -131,12 +45,60 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
     super.dispose();
   }
 
+  Future<void> _completeProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final currentUser = _authService.currentUser;
+      if (currentUser == null) return;
+
+      await _authService.updateUserProfile(
+        currentUser.uid,
+        _nameController.text.trim(),
+        _selectedRole,
+        _selectedFireStation,
+      );
+
+      // Explizit zum PendingApprovalScreen navigieren und den
+      // gesamten Stack leeren — egal ob dieser Screen via push
+      // oder als main.dart home aufgerufen wurde.
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const PendingApprovalScreen(),
+          ),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Fehler beim Speichern: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil vervollständigen'),
-        automaticallyImplyLeading: false, // Zurück-Button entfernen
+        automaticallyImplyLeading: false,
+        actions: [
+          TextButton.icon(
+            onPressed: () => _authService.signOut(),
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('Abmelden'),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -148,108 +110,85 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
               children: [
                 const Text(
                   'Bitte vervollständigen Sie Ihr Profil',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Angemeldet als: ${FirebaseAuth.instance.currentUser?.email ?? ""}',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
+                  'Angemeldet als: ${FirebaseAuth.instance.currentUser?.email ?? ''}',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 24),
+
+                // Name
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
-                    labelText: 'Name',
+                    labelText: 'Vor- und Nachname',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.person),
                   ),
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return 'Bitte geben Sie Ihren Namen ein';
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
+
+                // Rolle
                 DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(
-                    labelText: 'Rolle',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.work),
-                  ),
                   value: _selectedRole,
-                  items: _roles.map((String role) {
-                    return DropdownMenuItem<String>(
-                      value: role,
-                      child: Text(role),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) {
-                      setState(() {
-                        _selectedRole = newValue;
-                      });
-                    }
+                  decoration: const InputDecoration(
+                    labelText: 'Funktion',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.badge),
+                  ),
+                  items: _roles
+                      .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _selectedRole = v);
                   },
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Bitte wählen Sie Ihre Rolle aus';
-                    }
-                    return null;
-                  },
+                  validator: (v) => v == null || v.isEmpty
+                      ? 'Bitte wählen Sie Ihre Funktion'
+                      : null,
                 ),
                 const SizedBox(height: 16),
+
+                // Ortsfeuerwehr
                 DropdownButtonFormField<String>(
+                  value: _selectedFireStation,
                   decoration: const InputDecoration(
                     labelText: 'Ortsfeuerwehr',
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.location_city),
+                    prefixIcon: Icon(Icons.local_fire_department),
                   ),
-                  value: _selectedFireStation,
-                  items: _fireStations.map((String station) {
-                    return DropdownMenuItem<String>(
-                      value: station,
-                      child: Text(station),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) {
-                      setState(() {
-                        _selectedFireStation = newValue;
-                      });
-                    }
+                  items: FireStations.all
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _selectedFireStation = v);
                   },
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Bitte wählen Sie Ihre Ortsfeuerwehr aus';
-                    }
-                    return null;
-                  },
+                  validator: (v) => v == null || v.isEmpty
+                      ? 'Bitte wählen Sie Ihre Ortsfeuerwehr'
+                      : null,
                 ),
                 const SizedBox(height: 32),
+
                 ElevatedButton(
                   onPressed: _isLoading ? null : _completeProfile,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isLoading
-                      ? const CircularProgressIndicator()
-                      : const Text(
-                    'Profil speichern',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () async {
-                    await _authService.signOut();
-                  },
-                  child: const Text('Abmelden'),
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Profil speichern',
+                          style: TextStyle(fontSize: 16)),
                 ),
               ],
             ),

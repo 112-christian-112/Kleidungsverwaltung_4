@@ -7,6 +7,9 @@ class PendingApprovalScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Kein navigatorKey, kein pushNamedAndRemoveUntil nötig.
+    // signOut() → authStateChanges feuert → StreamBuilder in main.dart
+    // baut automatisch LoginScreen → das ist die sauberste Lösung.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Freigabe ausstehend'),
@@ -16,6 +19,7 @@ class PendingApprovalScreen extends StatelessWidget {
             onPressed: () => AuthService().signOut(),
             icon: const Icon(Icons.logout, size: 18),
             label: const Text('Abmelden'),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
           ),
         ],
       ),
@@ -25,27 +29,17 @@ class PendingApprovalScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Animiertes Warte-Icon
-              TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.8, end: 1.0),
-                duration: const Duration(seconds: 2),
-                curve: Curves.easeInOut,
-                builder: (context, scale, child) => Transform.scale(
-                  scale: scale,
-                  child: child,
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  shape: BoxShape.circle,
                 ),
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.hourglass_top_rounded,
-                    size: 56,
-                    color: Colors.amber,
-                  ),
+                child: const Icon(
+                  Icons.hourglass_top_rounded,
+                  size: 56,
+                  color: Colors.amber,
                 ),
               ),
 
@@ -54,9 +48,7 @@ class PendingApprovalScreen extends StatelessWidget {
               const Text(
                 'Freigabe ausstehend',
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+                    fontSize: 24, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
 
@@ -74,7 +66,6 @@ class PendingApprovalScreen extends StatelessWidget {
 
               const SizedBox(height: 12),
 
-              // Hinweis auf automatische Weiterleitung
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 10),
@@ -93,9 +84,8 @@ class PendingApprovalScreen extends StatelessWidget {
                       child: Text(
                         'Sie werden automatisch weitergeleitet, sobald Ihr Konto freigeschaltet wird.',
                         style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.green.shade700,
-                        ),
+                            fontSize: 13,
+                            color: Colors.green.shade700),
                       ),
                     ),
                   ],
@@ -104,7 +94,6 @@ class PendingApprovalScreen extends StatelessWidget {
 
               const SizedBox(height: 40),
 
-              // Live-Indikator
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -120,11 +109,17 @@ class PendingApprovalScreen extends StatelessWidget {
                   Text(
                     'Warte auf Freigabe...',
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey.shade500,
-                    ),
+                        fontSize: 13, color: Colors.grey.shade500),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 32),
+
+              OutlinedButton.icon(
+                onPressed: () => AuthService().signOut(),
+                icon: const Icon(Icons.logout, size: 16),
+                label: const Text('Abmelden'),
               ),
             ],
           ),

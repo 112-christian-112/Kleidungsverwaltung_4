@@ -34,11 +34,9 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Theme Service initialisieren
   final themeService = ThemeService();
   await themeService.initialize();
 
-  // Datums-Formatierung für Deutsch
   await initializeDateFormatting('de_DE', '');
   Intl.defaultLocale = 'de_DE';
 
@@ -64,7 +62,11 @@ class MyApp extends StatelessWidget {
       darkTheme: themeService.getDarkTheme(),
       themeMode: themeService.getThemeMode(),
 
-      // ── Auth-Gate ───────────────────────────────────────────────────────
+      // ── Auth-Gate ────────────────────────────────────────────────────────
+      // Äußerer StreamBuilder: reagiert auf Login/Logout (Firebase Auth)
+      // Innerer StreamBuilder: reagiert auf Firestore-Änderungen (isApproved etc.)
+      // Durch ValueKey(uid) wird der innere Stream bei jedem neuen Login
+      // komplett neu aufgebaut → kein gecachter Zustand.
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, authSnapshot) {
@@ -75,18 +77,16 @@ class MyApp extends StatelessWidget {
             );
           }
 
-          // Kein User angemeldet → Login
+          // Nicht eingeloggt → Login
           if (!authSnapshot.hasData) {
             return const LoginScreen();
           }
 
           final uid = authSnapshot.data!.uid;
 
-          // User angemeldet → Live-Listener auf Firestore-Dokument.
-          // Reagiert sofort wenn Admin isApproved setzt oder Profil
-          // vervollständigt wird — kein manuelles Refresh nötig.
+          // Eingeloggt → Live-Listener auf Firestore
           return StreamBuilder<Map<String, dynamic>>(
-            key: ValueKey(uid), // Neu bauen bei jedem User-Wechsel
+            key: ValueKey(uid),
             stream: AuthService().watchUserStatus(uid),
             builder: (context, statusSnapshot) {
               // Firestore noch nicht geantwortet
@@ -105,7 +105,7 @@ class MyApp extends StatelessWidget {
                 );
               }
 
-              // Verbindungsfehler (z.B. offline)
+              // Verbindungsfehler
               if (statusSnapshot.hasError) {
                 return Scaffold(
                   body: Center(
@@ -117,21 +117,14 @@ class MyApp extends StatelessWidget {
                           const Icon(Icons.wifi_off,
                               size: 64, color: Colors.grey),
                           const SizedBox(height: 16),
-                          const Text(
-                            'Verbindungsfehler',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '${statusSnapshot.error}',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.grey),
-                          ),
+                          const Text('Verbindungsfehler',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                           const SizedBox(height: 24),
                           ElevatedButton(
                             onPressed: () => AuthService().signOut(),
-                            child: const Text('Abmelden und neu versuchen'),
+                            child: const Text('Abmelden'),
                           ),
                         ],
                       ),
@@ -146,25 +139,25 @@ class MyApp extends StatelessWidget {
                 'isProfileComplete': false,
               };
 
-              // Profil nicht vollständig → Profil-Screen
+              // Profil unvollständig
               if (!status['exists'] || !status['isProfileComplete']) {
                 return const ProfileCompletionScreen();
               }
 
-              // Warten auf Admin-Freigabe → Pending-Screen
-              // (wird automatisch verlassen sobald Admin freigibt)
+              // Warten auf Admin-Freigabe
+              // Sobald Admin freigibt, feuert watchUserStatus erneut
+              // → dieser StreamBuilder baut automatisch HomeScreen
               if (!status['isApproved']) {
                 return const PendingApprovalScreen();
               }
 
-              // Alles OK → Home
+              // Alles OK
               return const HomeScreen();
             },
           );
         },
       ),
 
-      // ── Benannte Routen ─────────────────────────────────────────────────
       routes: {
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
