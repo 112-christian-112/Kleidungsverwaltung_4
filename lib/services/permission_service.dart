@@ -1,263 +1,214 @@
 // services/permission_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../models/user_models.dart';
 
+/// Zentraler Berechtigungs-Service.
+///
+/// Jede public-Methode macht intern **einen** Firestore-Read via
+/// [_fetchCurrentUser] und leitet daraus das Ergebnis ab.
+/// Screens, die mehrere Informationen gleichzeitig brauchen, sollen
+/// stattdessen direkt [getCurrentUser] aufrufen und das [UserModel]
+/// lokal auswerten — so spart man mehrere sequenzielle Reads.
 class PermissionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Bestehende Methoden
-  Future<bool> isAdmin() async {
+  // ── Interner Basis-Read ───────────────────────────────────────────────────
+
+  /// Lädt das [UserModel] des aktuell eingeloggten Benutzers.
+  /// Gibt `null` zurück wenn kein User eingeloggt ist oder das Dokument
+  /// nicht existiert.
+  Future<UserModel?> _fetchCurrentUser() async {
     try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return false;
+      final firebaseUser = _auth.currentUser;
+      if (firebaseUser == null) return null;
 
-      DocumentSnapshot userDoc = await _firestore
+      final doc = await _firestore
           .collection('users')
-          .doc(currentUser.uid)
+          .doc(firebaseUser.uid)
           .get();
+      if (!doc.exists) return null;
 
-      if (!userDoc.exists) return false;
-
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      return userData['role'] == 'admin';
+      return UserModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
     } catch (e) {
-      print('Fehler beim Prüfen der Admin-Berechtigung: $e');
-      return false;
+      print('PermissionService._fetchCurrentUser: $e');
+      return null;
     }
   }
 
-  // NEUE METHODE: Prüft ob Benutzer zur Hygieneeinheit gehört
-  Future<bool> isHygieneUnit() async {
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return false;
+  // ── Öffentliche API ───────────────────────────────────────────────────────
 
-      DocumentSnapshot userDoc = await _firestore
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
+  /// Gibt das vollständige [UserModel] zurück.
+  /// **Bevorzugte Methode** für Screens, die mehrere Permissions brauchen.
+  Future<UserModel?> getCurrentUser() => _fetchCurrentUser();
 
-      if (!userDoc.exists) return false;
+  // Basis-Infos
+  Future<bool> isAdmin() async => (await _fetchCurrentUser())?.isAdmin ?? false;
+  Future<String> getUserRole() async =>
+      (await _fetchCurrentUser())?.role ?? 'user';
+  Future<String> getUserFireStation() async =>
+      (await _fetchCurrentUser())?.fireStation ?? '';
 
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      return userData['role'] == 'hygiene' || userData['role'] == 'hygiene_unit';
-    } catch (e) {
-      print('Fehler beim Prüfen der Hygieneeinheit-Berechtigung: $e');
-      return false;
-    }
+  // ── Berechtigungs-Shortcuts (jeweils 1 Firestore-Read) ───────────────────
+
+  Future<UserPermissions> _permissions() async {
+    final user = await _fetchCurrentUser();
+    if (user == null) return const UserPermissions();
+    if (user.isAdmin) return UserPermissions.admin();
+    return user.permissions;
   }
 
-  // NEUE METHODE: Prüft ob Benutzer Ortszeugwart ist
-  Future<bool> isOrtszeugwart() async {
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return false;
+  // Einsatzkleidung
+  Future<bool> canViewEquipment() async => (await _permissions()).equipmentView;
+  Future<bool> canEditEquipment() async => (await _permissions()).equipmentEdit;
+  Future<bool> canAddEquipment() async => (await _permissions()).equipmentAdd;
+  Future<bool> canDeleteEquipment() async =>
+      (await _permissions()).equipmentDelete;
 
-      DocumentSnapshot userDoc = await _firestore
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
+  // Einsätze
+  Future<bool> canViewMissions() async => (await _permissions()).missionView;
+  Future<bool> canEditMissions() async => (await _permissions()).missionEdit;
+  Future<bool> canAddMissions() async => (await _permissions()).missionAdd;
+  Future<bool> canDeleteMissions() async => (await _permissions()).missionDelete;
 
-      if (!userDoc.exists) return false;
+  // Prüfungen
+  Future<bool> canViewInspections() async =>
+      (await _permissions()).inspectionView;
+  Future<bool> canEditInspections() async =>
+      (await _permissions()).inspectionEdit;
+  Future<bool> canDeleteInspections() async =>
+      (await _permissions()).inspectionDelete;
+  Future<bool> canPerformInspections() async =>
+      (await _permissions()).inspectionPerform;
 
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      return userData['role'] == 'Ortszeugwart';
-    } catch (e) {
-      print('Fehler beim Prüfen der Ortszeugwart-Berechtigung: $e');
-      return false;
-    }
-  }
+  // Reinigung
+  Future<bool> canViewCleaning() async => (await _permissions()).cleaningView;
+  Future<bool> canCreateCleaning() async => (await _permissions()).cleaningCreate;
 
-  // NEUE METHODE: Prüft ob Benutzer erweiterte Leserechte hat (Admin oder Hygieneeinheit)
-  Future<bool> hasExtendedReadAccess() async {
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return false;
+  // ── Sichtbare Ortswehren ──────────────────────────────────────────────────
 
-      DocumentSnapshot userDoc = await _firestore
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
-      if (!userDoc.exists) return false;
-
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      String role = userData['role'] ?? 'user';
-
-      return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit';
-    } catch (e) {
-      print('Fehler beim Prüfen der erweiterten Leserechte: $e');
-      return false;
-    }
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer Schreibrechte für Ausrüstung hat (nur Admin)
-  Future<bool> canEditEquipment() async {
-    return await isAdmin();
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer Einsätze bearbeiten/löschen kann (nur Admin)
-  Future<bool> canEditMissions() async {
-    return await isAdmin();
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer alle Ausrüstung sehen kann (Admin oder Hygieneeinheit)
-  Future<bool> canViewAllEquipment() async {
-    return await hasExtendedReadAccess();
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer alle Einsätze sehen kann (Admin oder Hygieneeinheit)
-  Future<bool> canViewAllMissions() async {
-    return await hasExtendedReadAccess();
-  }
-
-  // NEUE METHODE: Gibt die Rolle des aktuellen Benutzers zurück
-  Future<String> getUserRole() async {
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return 'user';
-
-      DocumentSnapshot userDoc = await _firestore
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
-      if (!userDoc.exists) return 'user';
-
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      return userData['role'] ?? 'user';
-    } catch (e) {
-      print('Fehler beim Abrufen der Benutzerrolle: $e');
-      return 'user';
-    }
-  }
-
-  // Bestehende Methode bleibt unverändert
-  Future<String> getUserFireStation() async {
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) return '';
-
-      DocumentSnapshot userDoc = await _firestore
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
-      if (!userDoc.exists) return '';
-
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-      return userData['fireStation'] ?? '';
-    } catch (e) {
-      print('Fehler beim Abrufen der Feuerwehrstation: $e');
-      return '';
-    }
-  }
-
-  // NEUE METHODE: Bestimmt welche Feuerwehrstationen ein Benutzer sehen kann
   Future<List<String>> getVisibleFireStations() async {
-    try {
-      final hasExtendedAccess = await hasExtendedReadAccess();
-
-      if (hasExtendedAccess) {
-        // Admin und Hygieneeinheit können alle Stationen sehen
-        return [
-          'Alle', // Spezialwert für "alle anzeigen"
-          'Esklum',
-          'Breinermoor',
-          'Grotegaste',
-          'Flachsmeer',
-          'Folmhusen',
-          'Großwolde',
-          'Ihrhove',
-          'Ihren',
-          'Steenfelde',
-          'Völlen',
-          'Völlenerfehn',
-          'Völlenerkönigsfehn'
-        ];
-      } else {
-        // Normale Benutzer sehen nur ihre eigene Station
-        final userStation = await getUserFireStation();
-        return userStation.isNotEmpty ? [userStation] : [];
-      }
-    } catch (e) {
-      print('Fehler beim Abrufen der sichtbaren Feuerwehrstationen: $e');
-      return [];
+    final user = await _fetchCurrentUser();
+    if (user == null) return [];
+    if (user.isAdmin || user.permissions.visibleFireStations.contains('*')) {
+      return ['*']; // alle
     }
+    return <String>{user.fireStation, ...user.permissions.visibleFireStations}
+        .toList();
   }
 
-  // ERWEITERTE METHODE: Prüft ob Benutzer eine bestimmte Aktion durchführen kann
-  Future<bool> canPerformAction(String action) async {
-    final role = await getUserRole();
+  Future<bool> canSeeFireStation(String station) async {
+    final user = await _fetchCurrentUser();
+    if (user == null) return false;
+    return user.canSeeFireStation(station);
+  }
 
+  // ── Admin: Permissions eines anderen Users speichern ─────────────────────
+
+  Future<void> saveUserPermissions(
+      String userId, UserPermissions permissions) async {
+    await _firestore.collection('users').doc(userId).update(
+          permissions.toMap(),
+        );
+  }
+
+  Future<bool> canViewUserRoles() async => isAdmin();
+
+  // ── Altes String-basiertes Interface (Kompatibilität) ────────────────────
+  //
+  // Screens die noch nicht migriert sind, können weiterhin
+  // canPerformAction('edit_equipment') aufrufen. Neue Screens sollen
+  // stattdessen getCurrentUser() + UserModel-Properties verwenden.
+
+  Future<bool> canPerformAction(String action) async {
+    final p = await _permissions();
     switch (action) {
       case 'view_all_equipment':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit';
-      case 'view_all_missions':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit';
-      case 'update_check_date':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-
+      case 'view_equipment':
+        return p.equipmentView;
       case 'edit_equipment':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-      case 'delete_equipment':
+        return p.equipmentEdit;
       case 'add_equipment':
-      return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-
+        return p.equipmentAdd;
+      case 'delete_equipment':
+        return p.equipmentDelete;
+      case 'view_all_missions':
+      case 'view_missions':
+        return p.missionView;
       case 'edit_missions':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-      case 'delete_missions':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart';
+        return p.missionEdit;
       case 'add_missions':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-
-      case 'update_equipment_status':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-      case 'update_wash_cycles':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-      case 'update_check_date':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-
-    // NEUE PRÜFUNGSBERECHTIGUNGEN
-      case 'perform_inspections':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
-      case 'edit_inspections':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart';
-      case 'delete_inspections':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart';
+        return p.missionAdd;
+      case 'delete_missions':
+        return p.missionDelete;
       case 'view_all_inspections':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart';
-
+      case 'view_inspections':
+        return p.inspectionView;
+      case 'edit_inspections':
+        return p.inspectionEdit;
+      case 'delete_inspections':
+        return p.inspectionDelete;
+      case 'perform_inspections':
+        return p.inspectionPerform;
       case 'view_cleaning_receipts':
-        return  role == 'admin' || role == 'hygiene' || role == 'hygiene_unit' || role == 'Ortszeugwart' || role == 'Ortsbrandmeister';
+        return p.cleaningView;
       case 'generate_cleaning_receipts':
-        return role == 'admin' || role == 'hygiene' || role == 'hygiene_unit';
-
+        return p.cleaningCreate;
+      case 'update_equipment_status':
+      case 'update_wash_cycles':
+      case 'update_check_date':
+        return p.equipmentEdit;
       default:
         return false;
     }
   }
 
-  // NEUE METHODE: Gibt benutzerfreundlichen Namen für Rollen zurück
+  // ── Alte rollenbasierte Methoden (Kompatibilität) ─────────────────────────
+  //
+  // Diese Methoden existieren noch, damit Screens die noch nicht
+  // umgestellt wurden nicht brechen. Sie lesen intern über das neue
+  // UserModel — kein direkter Rollen-String-Vergleich mehr.
+
+  /// @deprecated Nutze stattdessen getCurrentUser() und user.isAdmin
+  Future<bool> isHygieneUnit() async {
+    final user = await _fetchCurrentUser();
+    // Hygieneeinheit hat cleaningCreate-Recht aber ist kein Admin
+    return user != null &&
+        !user.isAdmin &&
+        user.permissions.cleaningCreate == true;
+  }
+
+  /// @deprecated Nutze stattdessen getCurrentUser() und user.permissions
+  Future<bool> isOrtszeugwart() async {
+    final user = await _fetchCurrentUser();
+    // Ortszeugwart: hat Equipment-Edit-Recht aber ist kein Admin
+    return user != null &&
+        !user.isAdmin &&
+        user.permissions.equipmentEdit == true;
+  }
+
+  /// @deprecated Nutze stattdessen canViewEquipment()
+  Future<bool> hasExtendedReadAccess() async {
+    final user = await _fetchCurrentUser();
+    if (user == null) return false;
+    return user.isAdmin || user.permissions.equipmentView;
+  }
+
+  /// @deprecated Nutze stattdessen canViewEquipment()
+  Future<bool> canViewAllEquipment() async => canViewEquipment();
+
+  /// @deprecated Nutze stattdessen canViewMissions()
+  Future<bool> canViewAllMissions() async => canViewMissions();
+
+  // ── Hilfsmethode ─────────────────────────────────────────────────────────
+
   String getRoleDisplayName(String role) {
     switch (role) {
       case 'admin':
         return 'Administrator';
-      case 'hygiene':
-        return 'Hygieneeinheit';
-      case 'hygiene_unit':
-        return 'Hygieneeinheit';
-      case 'Ortszeugwart':
-        return 'Ortszeugwart';
-      case 'user':
       default:
         return 'Benutzer';
     }
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer Berechtigung hat, die Rolle anderer zu sehen
-  Future<bool> canViewUserRoles() async {
-    return await isAdmin();
   }
 }

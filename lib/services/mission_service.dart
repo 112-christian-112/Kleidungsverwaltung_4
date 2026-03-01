@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../models/mission_model.dart';
 import '../models/equipment_model.dart';
+import '../models/user_models.dart';
 import 'permission_service.dart';
 
 class MissionService {
@@ -11,20 +12,52 @@ class MissionService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final PermissionService _permissionService = PermissionService();
 
-  // ERWEITERTE METHODE: Einsätze basierend auf Benutzerberechtigungen abrufen
-  Stream<List<MissionModel>> getMissionsForCurrentUser() async* {
+// Einsätze basierend auf UserModel-Permissions laden.
+  /// Akzeptiert nullable UserModel — bei null wird der alte PermissionService
+  /// als Fallback genutzt (Rückwärtskompatibilität).
+  Stream<List<MissionModel>> getMissionsForCurrentUser([UserModel? user]) async* {
     try {
-      final canViewAll = await _permissionService.canViewAllMissions();
-
-      if (canViewAll) {
-        // Admin und Hygieneeinheit können alle Einsätze sehen
-        yield* getAllMissions();
-      } else {
-        // Normale Benutzer sehen nur Einsätze ihrer Feuerwehr
-        yield* getMissionsForUserFireStation();
+      // Fallback: kein UserModel übergeben → alten Weg nutzen
+      if (user == null) {
+        final canViewAll = await _permissionService.canViewAllMissions();
+        if (canViewAll) {
+          yield* getAllMissions();
+        } else {
+          yield* getMissionsForUserFireStation();
+        }
+        return;
       }
+
+      // Kein Leserecht → leer
+      if (!user.isAdmin && user.permissions.missionView != true) {
+        yield [];
+        return;
+      }
+
+      // Admin oder Wildcard → alle Einsätze
+      if (user.isAdmin ||
+          user.permissions.visibleFireStations.contains('*')) {
+        yield* getAllMissions();
+        return;
+      }
+
+      // Sichtbare Stationen (eigene + freigegebene)
+      final stations = <String>{user.fireStation};
+      stations.addAll(user.permissions.visibleFireStations);
+
+      // Client-seitiger Filter (kein arrayContainsAny-Limit-Problem)
+      yield* _firestore
+          .collection('missions')
+          .orderBy('startTime', descending: true)
+          .snapshots()
+          .map((snap) => snap.docs
+          .map((d) => MissionModel.fromMap(d.data(), d.id))
+          .where((m) =>
+      stations.contains(m.fireStation) ||
+          m.involvedFireStations.any((s) => stations.contains(s)))
+          .toList());
     } catch (e) {
-      print('Fehler beim Abrufen der Einsätze für aktuellen Benutzer: $e');
+      print('Fehler getMissionsForCurrentUser: $e');
       yield [];
     }
   }

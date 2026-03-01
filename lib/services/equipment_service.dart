@@ -12,14 +12,27 @@ class EquipmentService {
   // ERWEITERTE METHODE: Ausrüstung basierend auf Benutzerberechtigungen abrufen
   Stream<List<EquipmentModel>> getEquipmentByUserAccess() async* {
     try {
-      final hasExtendedAccess = await _permissionService.hasExtendedReadAccess();
+      final user = await _permissionService.getCurrentUser();
+      if (user == null) { yield []; return; }
 
-      if (hasExtendedAccess) {
-        // Admin und Hygieneeinheit können alle Ausrüstung sehen
+      // Kein Leserecht → sofort leere Liste
+      if (!user.isAdmin && !user.permissions.equipmentView) { yield []; return; }
+
+      // Admin oder '*' → alles laden
+      if (user.isAdmin || user.permissions.visibleFireStations.contains('*')) {
         yield* getAllEquipment();
+        return;
+      }
+
+      // Sichtbare Stationen ermitteln (eigene Feuerwehr immer dabei)
+      final stations = <String>{user.fireStation};
+      stations.addAll(user.permissions.visibleFireStations);
+      final stationList = stations.toList();
+
+      if (stationList.length == 1) {
+        yield* getEquipmentByFireStation(stationList.first);
       } else {
-        // Normale Benutzer sehen nur Ausrüstung ihrer Feuerwehr
-        yield* getEquipmentByUserFireStation();
+        yield* getEquipmentByMultipleFireStations(stationList);
       }
     } catch (e) {
       print('Fehler beim Abrufen der Ausrüstung nach Berechtigung: $e');

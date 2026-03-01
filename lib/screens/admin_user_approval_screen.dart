@@ -1,9 +1,9 @@
-
 // screens/admin_user_approval_screen.dart
 import 'package:flutter/material.dart';
 import '../models/user_models.dart';
 import '../services/auth_service.dart';
 import '../widgets/navigation_drawer.dart';
+import 'admin/user_permissions_screen.dart';
 
 class AdminUserApprovalScreen extends StatefulWidget {
   const AdminUserApprovalScreen({Key? key}) : super(key: key);
@@ -12,7 +12,8 @@ class AdminUserApprovalScreen extends StatefulWidget {
   State<AdminUserApprovalScreen> createState() => _AdminUserApprovalScreenState();
 }
 
-class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with SingleTickerProviderStateMixin {
+class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen>
+    with SingleTickerProviderStateMixin {
   final AuthService _authService = AuthService();
   late TabController _tabController;
   bool _isProcessing = false;
@@ -46,8 +47,8 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildUserList(false), // Ausstehende Benutzer
-          _buildUserList(true),  // Freigegebene Benutzer
+          _buildUserList(false),
+          _buildUserList(true),
         ],
       ),
     );
@@ -71,12 +72,13 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
         }
 
         final users = snapshot.data ?? [];
-        final filteredUsers = users.where((user) =>
-        user.isApproved == isApproved &&
-            user.name.isNotEmpty &&
-            user.role.isNotEmpty &&
-            user.fireStation.isNotEmpty
-        ).toList();
+        final filteredUsers = users
+            .where((user) =>
+                user.isApproved == isApproved &&
+                user.name.isNotEmpty &&
+                user.role.isNotEmpty &&
+                user.fireStation.isNotEmpty)
+            .toList();
 
         if (filteredUsers.isEmpty) {
           return Center(
@@ -118,15 +120,21 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
                         _buildInfoRow('E-Mail', user.email),
                         _buildInfoRow('Rolle', user.role),
                         _buildInfoRow('Ortsfeuerwehr', user.fireStation),
-                        _buildInfoRow('Registriert am',
-                            '${user.createdAt.day}.${user.createdAt.month}.${user.createdAt.year}'),
+                        _buildInfoRow(
+                          'Registriert am',
+                          '${user.createdAt.day}.${user.createdAt.month}.${user.createdAt.year}',
+                        ),
                         if (user.approvedAt != null)
-                          _buildInfoRow('Freigegeben am',
-                              '${user.approvedAt!.day}.${user.approvedAt!.month}.${user.approvedAt!.year}'),
+                          _buildInfoRow(
+                            'Freigegeben am',
+                            '${user.approvedAt!.day}.${user.approvedAt!.month}.${user.approvedAt!.year}',
+                          ),
                         const SizedBox(height: 16),
+                        // ── Aktionsbuttons ───────────────────────────────
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
+                            // Freigeben (nur wenn noch nicht freigegeben)
                             if (!isApproved) ...[
                               ElevatedButton(
                                 onPressed: _isProcessing
@@ -140,6 +148,7 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
                               ),
                               const SizedBox(width: 8),
                             ],
+                            // Zurückziehen (nur wenn bereits freigegeben)
                             if (isApproved) ...[
                               ElevatedButton(
                                 onPressed: _isProcessing
@@ -153,6 +162,22 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
                               ),
                               const SizedBox(width: 8),
                             ],
+                            // ── NEU: Rechte bearbeiten ───────────────────
+                            if (isApproved && !user.isAdmin) ...[
+                              ElevatedButton.icon(
+                                onPressed: () => _openPermissionsScreen(user),
+                                icon: const Icon(Icons.shield, size: 16),
+                                label: const Text('Rechte'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .primary,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            // Löschen
                             ElevatedButton(
                               onPressed: _isProcessing
                                   ? null
@@ -190,19 +215,26 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
-          Expanded(
-            child: Text(value),
-          ),
+          Expanded(child: Text(value)),
         ],
       ),
     );
   }
 
-  Future<void> _approveUser(String userId) async {
-    setState(() {
-      _isProcessing = true;
-    });
+  // ── Navigation zum Permissions-Screen ────────────────────────────────────────
+  void _openPermissionsScreen(UserModel user) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UserPermissionsScreen(user: user),
+      ),
+    );
+  }
 
+  // ── Aktionen ──────────────────────────────────────────────────────────────────
+
+  Future<void> _approveUser(String userId) async {
+    setState(() => _isProcessing = true);
     try {
       await _authService.approveUser(userId);
       if (mounted) {
@@ -213,26 +245,16 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Fehler: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
   Future<void> _rejectUser(String userId) async {
-    setState(() {
-      _isProcessing = true;
-    });
-
+    setState(() => _isProcessing = true);
     try {
       await _authService.rejectUser(userId);
       if (mounted) {
@@ -243,38 +265,32 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Fehler: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
   Future<void> _deleteUser(String userId) async {
-    // Bestätigungsdialog anzeigen
-    bool? confirm = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Benutzer löschen'),
         content: const Text(
-            'Sind Sie sicher, dass Sie diesen Benutzer löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.'
+          'Sind Sie sicher, dass Sie diesen Benutzer löschen möchten? '
+          'Diese Aktion kann nicht rückgängig gemacht werden.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Abbrechen'),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Löschen'),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Löschen', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -282,10 +298,7 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
 
     if (confirm != true) return;
 
-    setState(() {
-      _isProcessing = true;
-    });
-
+    setState(() => _isProcessing = true);
     try {
       await _authService.deleteUser(userId);
       if (mounted) {
@@ -296,18 +309,11 @@ class _AdminUserApprovalScreenState extends State<AdminUserApprovalScreen> with 
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Fehler: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 }

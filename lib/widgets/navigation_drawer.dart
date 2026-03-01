@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../screens/admin/debug_permissions_screen.dart';
 import '../screens/admin/equipment/upcoming_inspections_screen.dart';
 import '../screens/dashboard/dashboard_screen.dart';
 import '../services/auth_service.dart';
@@ -235,6 +236,16 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.pushNamed(context, '/admin-users');
+                },
+              ),
+              // In navigation_drawer.dart, im Admin-Bereich:
+              ListTile(
+                leading: const Icon(Icons.bug_report, color: Colors.red),
+                title: const Text('Debug: Berechtigungen'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => const DebugPermissionsScreen()));
                 },
               ),
             ],

@@ -15,7 +15,7 @@ import 'package:kleidungsverwaltung_2/screens/help_support_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/missions/add_missions_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/missions/mission_list_screen.dart';
 import 'package:kleidungsverwaltung_2/screens/privacy_policy_sreen.dart';
-import 'package:kleidungsverwaltung_2/services/admin_user_approval_screen.dart';
+import 'package:kleidungsverwaltung_2/screens/admin_user_approval_screen.dart';
 import 'package:kleidungsverwaltung_2/services/pending_approval_screen.dart';
 import 'package:kleidungsverwaltung_2/services/profile_completetion_screen.dart';
 import 'package:kleidungsverwaltung_2/services/settings_screen.dart';

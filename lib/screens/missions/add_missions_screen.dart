@@ -1,14 +1,12 @@
-// screens/missions/add_mission_screen.dart
+// screens/missions/add_missions_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../Lists/fire_stations.dart';
 import '../../Lists/mission_keywords.dart';
 import '../../models/mission_model.dart';
+import '../../models/user_models.dart';
 import '../../services/mission_service.dart';
 import '../../services/permission_service.dart';
-import '../../widgets/fire_station_selector.dart';
 import 'select_equipment_screen.dart';
 
 class AddMissionScreen extends StatefulWidget {
@@ -23,50 +21,32 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
   final MissionService _missionService = MissionService();
   final PermissionService _permissionService = PermissionService();
 
-  final TextEditingController _locationController = TextEditingController();
-  final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _startTimeController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _startTimeController = TextEditingController();
+
+  // Einmal laden, dann als Quelle der Wahrheit
+  UserModel? _currentUser;
+  bool _isLoading = true;
+  bool _isSaving = false;
 
   DateTime _startTime = DateTime.now();
   String _missionType = 'fire';
-  String _selectedKeyword = ''; // Neues Feld für Einsatzstichwort
+  String _selectedKeyword = '';
   String _fireStation = '';
   List<String> _selectedEquipmentIds = [];
   List<String> _selectedFireStations = [];
-  bool _isLoading = false;
-  bool _isAdmin = false;
 
-  // Ortswehren-Liste aus Konstanten-Klasse entfernt
-  // Wird jetzt über FireStations.getAllStations() abgerufen
+  // Berechtigungen
+  bool get _canChangeStation => _currentUser?.isAdmin == true;
+  List<String> get _allStations => FireStations.getAllStations();
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
-    _startTimeController.text = DateFormat('dd.MM.yyyy HH:mm').format(_startTime);
-  }
-
-  Future<void> _loadUserData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final userFireStation = await _permissionService.getUserFireStation();
-      final isAdmin = await _permissionService.isAdmin();
-
-      setState(() {
-        _fireStation = userFireStation;
-        _isAdmin = isAdmin;
-        _selectedFireStations = [userFireStation];
-        _isLoading = false;
-      });
-    } catch (e) {
-      print('Fehler beim Laden der Benutzerdaten: $e');
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    _startTimeController.text =
+        DateFormat('dd.MM.yyyy HH:mm').format(_startTime);
+    _loadUser();
   }
 
   @override
@@ -77,156 +57,136 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
     super.dispose();
   }
 
-  // Einsatzstichwörter für den aktuellen Typ abrufen - jetzt aus der Konstanten-Klasse
-  List<String> _getKeywordsForType(String type) {
-    return MissionKeywords.getKeywordsForType(type);
+  // ── Laden ─────────────────────────────────────────────────────────────────
+
+  Future<void> _loadUser() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await _permissionService.getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _currentUser = user;
+          _fireStation = user?.fireStation ?? '';
+          // Eigene Wehr ist immer vorausgewählt
+          if (_fireStation.isNotEmpty) {
+            _selectedFireStations = [_fireStation];
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Fehler _loadUser: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  // Beim Wechsel des Einsatztyps das Stichwort zurücksetzen
-  void _onMissionTypeChanged(String newType) {
+  // ── Aktionen ──────────────────────────────────────────────────────────────
+
+  void _onTypeChanged(String newType) {
     setState(() {
       _missionType = newType;
-      _selectedKeyword = ''; // Stichwort zurücksetzen
+      _selectedKeyword = '';
     });
   }
 
   Future<void> _selectStartTime() async {
-    final DateTime? pickedDate = await showDatePicker(
+    final pickedDate = await showDatePicker(
       context: context,
       initialDate: _startTime,
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
+    if (pickedDate == null || !mounted) return;
 
-    if (pickedDate != null) {
-      final TimeOfDay? pickedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(_startTime),
-      );
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_startTime),
+    );
+    if (pickedTime == null) return;
 
-      if (pickedTime != null) {
-        setState(() {
-          _startTime = DateTime(
-            pickedDate.year,
-            pickedDate.month,
-            pickedDate.day,
-            pickedTime.hour,
-            pickedTime.minute,
-          );
-          _startTimeController.text = DateFormat('dd.MM.yyyy HH:mm').format(_startTime);
-        });
-      }
-    }
+    setState(() {
+      _startTime = DateTime(pickedDate.year, pickedDate.month, pickedDate.day,
+          pickedTime.hour, pickedTime.minute);
+      _startTimeController.text =
+          DateFormat('dd.MM.yyyy HH:mm').format(_startTime);
+    });
   }
 
   Future<void> _selectEquipment() async {
     final result = await Navigator.push<List<String>>(
       context,
       MaterialPageRoute(
-        builder: (context) => SelectEquipmentScreen(
+        builder: (_) => SelectEquipmentScreen(
           preselectedIds: _selectedEquipmentIds,
           fireStation: _fireStation,
         ),
       ),
     );
-
-    if (result != null) {
-      setState(() {
-        _selectedEquipmentIds = result;
-      });
-    }
+    if (result != null) setState(() => _selectedEquipmentIds = result);
   }
 
   Future<void> _selectInvolvedFireStations() async {
-    final result = await showFireStationSelector(
+    final result = await showDialog<List<String>>(
       context: context,
-      selectedStations: _selectedFireStations,
-      userFireStation: _fireStation,
-      title: 'Beteiligte Ortswehren',
-      helpText: 'Wählen Sie die am Einsatz beteiligten Ortswehren aus:',
-      showFullNames: true,
+      builder: (_) => _FireStationSelectorDialog(
+        allStations: _allStations,
+        selectedStations: List.from(_selectedFireStations),
+        ownFireStation: _fireStation,
+      ),
     );
-
-    if (result != null) {
-      setState(() {
-        _selectedFireStations = result;
-      });
-    }
+    if (result != null) setState(() => _selectedFireStations = result);
   }
 
   Future<void> _saveMission() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
+    if (!_formKey.currentState!.validate()) return;
+    if (_currentUser == null) return;
 
-      try {
-        User? currentUser = FirebaseAuth.instance.currentUser;
-        if (currentUser == null) {
-          throw Exception('Kein Benutzer angemeldet');
-        }
+    setState(() => _isSaving = true);
+    try {
+      final missionName = _selectedKeyword.isNotEmpty
+          ? _selectedKeyword
+          : 'Einsatz ohne Stichwort';
 
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUser.uid)
-            .get();
-        Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+      final mission = MissionModel(
+        id: '',
+        name: missionName,
+        startTime: _startTime,
+        type: _missionType,
+        location: _locationController.text.trim(),
+        description: _descriptionController.text.trim(),
+        equipmentIds: _selectedEquipmentIds,
+        fireStation: _fireStation,
+        involvedFireStations: _selectedFireStations,
+        // Name aus UserModel — kein extra Firestore-Read nötig
+        createdBy: _currentUser!.name.isNotEmpty
+            ? _currentUser!.name
+            : _currentUser!.email,
+        createdAt: DateTime.now(),
+      );
 
-        // Einsatzname aus Stichwort generieren
-        String missionName = _selectedKeyword.isNotEmpty
-            ? _selectedKeyword
-            : 'Einsatz ohne Stichwort';
+      final missionRef = await _missionService.createMission(mission);
 
-        MissionModel mission = MissionModel(
-          id: '',
-          name: missionName, // Verwende das ausgewählte Stichwort als Name
-          startTime: _startTime,
-          type: _missionType,
-          location: _locationController.text.trim(),
-          description: _descriptionController.text.trim(),
-          equipmentIds: _selectedEquipmentIds,
-          fireStation: _fireStation,
-          involvedFireStations: _selectedFireStations,
-          createdBy: userData['name'] ?? currentUser.email ?? '',
-          createdAt: DateTime.now(),
-        );
+      if (_selectedEquipmentIds.isNotEmpty) {
+        await _missionService.addEquipmentToMission(
+            missionRef.id, _selectedEquipmentIds);
+      }
 
-        DocumentReference missionRef = await _missionService.createMission(mission);
-
-        if (_selectedEquipmentIds.isNotEmpty) {
-          await _missionService.addEquipmentToMission(
-              missionRef.id,
-              _selectedEquipmentIds
-          );
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Einsatz erfolgreich gespeichert'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.pop(context, true);
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Fehler: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Einsatz erfolgreich gespeichert'),
+            backgroundColor: Colors.green));
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Fehler: $e'), backgroundColor: Colors.red));
+        setState(() => _isSaving = false);
       }
     }
   }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -237,329 +197,406 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Grundinformationen
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Einsatzinformationen',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Einsatztyp (zuerst, damit Stichwörter aktualisiert werden)
-                      DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
-                          labelText: 'Einsatztyp',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.category),
-                        ),
-                        value: _missionType,
-                        items: MissionKeywords.getAllTypes().map((type) {
-                          return _buildDropdownItem(
-                              type,
-                              MissionKeywords.getTypeName(type),
-                              MissionKeywords.getTypeIcon(type)
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          if (newValue != null) {
-                            _onMissionTypeChanged(newValue);
-                          }
-                        },
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Bitte wählen Sie einen Einsatztyp aus';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Einsatzstichwort (neues Feld)
-                      DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
-                          labelText: 'Einsatzstichwort',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.label),
-                          helperText: 'Wählen Sie das passende Einsatzstichwort aus',
-                        ),
-                        value: _selectedKeyword.isEmpty ? null : _selectedKeyword,
-                        hint: const Text('Bitte Einsatzstichwort auswählen'),
-                        isExpanded: true,
-                        items: _getKeywordsForType(_missionType).map((String keyword) {
-                          return DropdownMenuItem<String>(
-                            value: keyword,
-                            child: Text(
-                              keyword,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedKeyword = newValue ?? '';
-                          });
-                        },
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Bitte wählen Sie ein Einsatzstichwort aus';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Ortsinformation
-                      TextFormField(
-                        controller: _locationController,
-                        decoration: const InputDecoration(
-                          labelText: 'Einsatzort',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.location_on),
-                          helperText: 'z.B. Hauptstraße 123, Ihrhove',
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Bitte geben Sie einen Einsatzort ein';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
+              padding: const EdgeInsets.all(16),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoCard(),
+                    const SizedBox(height: 16),
+                    _buildTimeCard(),
+                    const SizedBox(height: 16),
+                    _buildFireStationCard(),
+                    const SizedBox(height: 16),
+                    _buildEquipmentCard(),
+                    const SizedBox(height: 16),
+                    _buildDescriptionCard(),
+                    const SizedBox(height: 24),
+                    _buildSaveButton(),
+                    const SizedBox(height: 32),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
+            ),
+    );
+  }
 
-              // Zeitinformationen
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Zeitinformation',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
+  // ── Karten ────────────────────────────────────────────────────────────────
 
-                      // Startzeit
-                      TextFormField(
-                        controller: _startTimeController,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Einsatzzeitpunkt',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.access_time),
-                          helperText: 'Tippen Sie hier, um Datum und Uhrzeit zu ändern',
-                        ),
-                        onTap: _selectStartTime,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Bitte wählen Sie einen Zeitpunkt';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Beteiligte Ortswehren
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Beteiligte Ortswehren',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      InkWell(
-                        onTap: _selectInvolvedFireStations,
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: 'Beteiligte Ortswehren',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.fire_truck),
-                            helperText: 'Tippen Sie hier, um weitere Ortswehren hinzuzufügen',
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _selectedFireStations.isEmpty
-                                    ? const Text('Keine Ortswehren ausgewählt',
-                                    style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey))
-                                    : Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  children: _selectedFireStations.map((station) => Chip(
-                                    label: Text(station),
-                                    backgroundColor: station == _fireStation
-                                        ? Theme.of(context).colorScheme.primary.withOpacity(0.2)
-                                        : null,
-                                  )).toList(),
-                                ),
-                              ),
-                              const Icon(Icons.arrow_drop_down),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Ausrüstungsauswahl
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Ausrüstung',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      ListTile(
-                        leading: const Icon(Icons.inventory_2),
-                        title: const Text('Verwendete Ausrüstung'),
-                        subtitle: Text(
-                          _selectedEquipmentIds.isEmpty
-                              ? 'Keine Ausrüstung ausgewählt'
-                              : '${_selectedEquipmentIds.length} Ausrüstungsgegenstände ausgewählt',
-                        ),
-                        trailing: ElevatedButton(
-                          onPressed: _selectEquipment,
-                          child: const Text('Auswählen'),
-                        ),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Beschreibung
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Zusätzliche Informationen',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'Beschreibung (optional)',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.description),
-                          alignLabelWithHint: true,
-                          helperText: 'Weitere Details zum Einsatz',
-                        ),
-                        maxLines: 4,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 32),
-
-              // Speichern-Button
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _saveMission,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 2,
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                      : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.save, size: 24),
-                      SizedBox(width: 12),
-                      Text(
-                        'Einsatz speichern',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+  Widget _buildInfoCard() {
+    return _card(
+      icon: Icons.local_fire_department,
+      title: 'Einsatzinformationen',
+      child: Column(
+        children: [
+          // Einsatztyp
+          DropdownButtonFormField<String>(
+            value: _missionType,
+            decoration: const InputDecoration(
+              labelText: 'Einsatztyp',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.category),
+            ),
+            items: MissionKeywords.getAllTypes().map((type) {
+              return DropdownMenuItem(
+                value: type,
+                child: Row(children: [
+                  Icon(MissionKeywords.getTypeIcon(type), size: 20),
+                  const SizedBox(width: 8),
+                  Text(MissionKeywords.getTypeName(type)),
+                ]),
+              );
+            }).toList(),
+            onChanged: (v) {
+              if (v != null) _onTypeChanged(v);
+            },
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Bitte Einsatztyp wählen' : null,
           ),
-        ),
+          const SizedBox(height: 16),
+
+          // Einsatzstichwort
+          DropdownButtonFormField<String>(
+            value: _selectedKeyword.isEmpty ? null : _selectedKeyword,
+            hint: const Text('Bitte Einsatzstichwort auswählen'),
+            decoration: const InputDecoration(
+              labelText: 'Einsatzstichwort',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.label),
+            ),
+            isExpanded: true,
+            items: MissionKeywords.getKeywordsForType(_missionType)
+                .map((kw) => DropdownMenuItem(
+                      value: kw,
+                      child:
+                          Text(kw, overflow: TextOverflow.ellipsis),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _selectedKeyword = v ?? ''),
+            validator: (v) => v == null || v.isEmpty
+                ? 'Bitte Einsatzstichwort wählen'
+                : null,
+          ),
+          const SizedBox(height: 16),
+
+          // Einsatzort
+          TextFormField(
+            controller: _locationController,
+            decoration: const InputDecoration(
+              labelText: 'Einsatzort',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.location_on),
+              helperText: 'z.B. Hauptstraße 123, Ihrhove',
+            ),
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Bitte Einsatzort eingeben' : null,
+          ),
+        ],
       ),
     );
   }
 
-  DropdownMenuItem<String> _buildDropdownItem(String value, String text, IconData icon) {
-    return DropdownMenuItem<String>(
-      value: value,
-      child: Row(
+  Widget _buildTimeCard() {
+    return _card(
+      icon: Icons.access_time,
+      title: 'Zeitinformation',
+      child: TextFormField(
+        controller: _startTimeController,
+        readOnly: true,
+        decoration: const InputDecoration(
+          labelText: 'Einsatzzeitpunkt',
+          border: OutlineInputBorder(),
+          prefixIcon: Icon(Icons.calendar_today),
+          helperText: 'Tippen zum Ändern von Datum und Uhrzeit',
+        ),
+        onTap: _selectStartTime,
+        validator: (v) =>
+            v == null || v.isEmpty ? 'Bitte Zeitpunkt wählen' : null,
+      ),
+    );
+  }
+
+  Widget _buildFireStationCard() {
+    return _card(
+      icon: Icons.location_city,
+      title: 'Ortsfeuerwehren',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20),
-          const SizedBox(width: 8),
-          Text(text),
+          // Hauptfeuerwehr — nur Admins können sie ändern
+          DropdownButtonFormField<String>(
+            value: _fireStation.isNotEmpty ? _fireStation : null,
+            decoration: InputDecoration(
+              labelText: 'Hauptfeuerwehr',
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.home),
+              helperText: _canChangeStation
+                  ? null
+                  : 'Einsatz wird für deine Ortswehr erfasst',
+            ),
+            items: _allStations
+                .map((s) => DropdownMenuItem(
+                      value: s,
+                      child: Row(children: [
+                        Icon(FireStations.getIcon(s),
+                            size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text(s),
+                      ]),
+                    ))
+                .toList(),
+            onChanged: _canChangeStation
+                ? (v) {
+                    if (v != null) {
+                      setState(() {
+                        _fireStation = v;
+                        // Neue Hauptwehr in Beteiligten aufnehmen
+                        if (!_selectedFireStations.contains(v)) {
+                          _selectedFireStations = [v, ..._selectedFireStations];
+                        }
+                      });
+                    }
+                  }
+                : null,
+            validator: (v) =>
+                v == null || v.isEmpty ? 'Bitte Feuerwehr wählen' : null,
+          ),
+          const SizedBox(height: 16),
+
+          // Beteiligte Ortswehren
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Beteiligte Ortswehren',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              TextButton.icon(
+                onPressed: _selectInvolvedFireStations,
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('Bearbeiten'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _selectedFireStations.isEmpty
+              ? Text('Keine beteiligten Ortswehren',
+                  style: TextStyle(color: Colors.grey[600]))
+              : Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: _selectedFireStations
+                      .map((s) => Chip(
+                            avatar: Icon(FireStations.getIcon(s), size: 16),
+                            label: Text(s),
+                            backgroundColor: s == _fireStation
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withOpacity(0.15)
+                                : null,
+                            deleteIcon: s == _fireStation
+                                ? null
+                                : const Icon(Icons.close, size: 14),
+                            onDeleted: s == _fireStation
+                                ? null
+                                : () => setState(
+                                    () => _selectedFireStations.remove(s)),
+                          ))
+                      .toList(),
+                ),
         ],
       ),
+    );
+  }
+
+  Widget _buildEquipmentCard() {
+    return _card(
+      icon: Icons.inventory_2,
+      title: 'Ausrüstung',
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: CircleAvatar(
+          backgroundColor:
+              Theme.of(context).colorScheme.primary.withOpacity(0.1),
+          child: Icon(Icons.inventory_2,
+              color: Theme.of(context).colorScheme.primary),
+        ),
+        title: Text(_selectedEquipmentIds.isEmpty
+            ? 'Keine Ausrüstung ausgewählt'
+            : '${_selectedEquipmentIds.length} Ausrüstungsgegenstände'),
+        subtitle: _selectedEquipmentIds.isNotEmpty
+            ? const Text('Tippe zum Ändern')
+            : null,
+        trailing: ElevatedButton(
+          onPressed: _selectEquipment,
+          child: const Text('Auswählen'),
+        ),
+        onTap: _selectEquipment,
+      ),
+    );
+  }
+
+  Widget _buildDescriptionCard() {
+    return _card(
+      icon: Icons.description,
+      title: 'Zusätzliche Informationen',
+      child: TextFormField(
+        controller: _descriptionController,
+        decoration: const InputDecoration(
+          labelText: 'Beschreibung (optional)',
+          border: OutlineInputBorder(),
+          alignLabelWithHint: true,
+          helperText: 'Weitere Details zum Einsatz',
+        ),
+        maxLines: 4,
+      ),
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isSaving ? null : _saveMission,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+          elevation: 2,
+        ),
+        child: _isSaving
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Text('Einsatz speichern',
+                style: TextStyle(fontSize: 16)),
+      ),
+    );
+  }
+
+  // ── Hilfs-Widget ──────────────────────────────────────────────────────────
+
+  Widget _card(
+      {required IconData icon,
+      required String title,
+      required Widget child}) {
+    return Card(
+      elevation: 2,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(icon,
+                  color: Theme.of(context).colorScheme.primary, size: 22),
+              const SizedBox(width: 10),
+              Text(title,
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Stationsauswahl-Dialog ────────────────────────────────────────────────────
+
+class _FireStationSelectorDialog extends StatefulWidget {
+  final List<String> allStations;
+  final List<String> selectedStations;
+  final String ownFireStation;
+
+  const _FireStationSelectorDialog({
+    required this.allStations,
+    required this.selectedStations,
+    required this.ownFireStation,
+  });
+
+  @override
+  State<_FireStationSelectorDialog> createState() =>
+      _FireStationSelectorDialogState();
+}
+
+class _FireStationSelectorDialogState
+    extends State<_FireStationSelectorDialog> {
+  late List<String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = List.from(widget.selectedStations);
+    if (!_selected.contains(widget.ownFireStation) &&
+        widget.ownFireStation.isNotEmpty) {
+      _selected.add(widget.ownFireStation);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Beteiligte Ortswehren'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Wähle die am Einsatz beteiligten Ortswehren:',
+                style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: widget.allStations.map((station) {
+                    final isOwn = station == widget.ownFireStation;
+                    return CheckboxListTile(
+                      dense: true,
+                      value: _selected.contains(station),
+                      title: Row(children: [
+                        Icon(FireStations.getIcon(station),
+                            size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text(station),
+                      ]),
+                      subtitle: isOwn
+                          ? const Text('Hauptfeuerwehr',
+                              style: TextStyle(
+                                  fontStyle: FontStyle.italic,
+                                  fontSize: 11))
+                          : null,
+                      onChanged: isOwn
+                          ? null
+                          : (v) => setState(() => v == true
+                              ? _selected.add(station)
+                              : _selected.remove(station)),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Abbrechen')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _selected),
+            child: const Text('Übernehmen')),
+      ],
     );
   }
 }
