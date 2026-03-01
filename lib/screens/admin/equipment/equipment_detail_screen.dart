@@ -19,6 +19,7 @@ class EquipmentDetailScreen extends StatefulWidget {
   const EquipmentDetailScreen({Key? key, required this.equipment})
       : super(key: key);
 
+
   @override
   State<EquipmentDetailScreen> createState() => _EquipmentDetailScreenState();
 }
@@ -29,10 +30,11 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
       EquipmentInspectionService();
   final PermissionService _permissionService = PermissionService();
 
+
   UserModel? _currentUser;
   bool _isProcessing = false;
   StreamSubscription? _inspectionSubscription;
-
+  StreamSubscription? _equipmentSubscription;
   late int _washCycles;
   late DateTime _checkDate;
   late String _status;
@@ -58,16 +60,18 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
     super.initState();
     _washCycles = widget.equipment.washCycles;
     _checkDate = widget.equipment.checkDate;
-    _checkDateController.text =
-        DateFormat('dd.MM.yyyy').format(_checkDate);
+    _checkDateController.text = DateFormat('dd.MM.yyyy').format(_checkDate);
     _status = widget.equipment.status;
     _loadUser();
     _loadInspectionData();
+    _startEquipmentStream();   // NEU
   }
+
 
   @override
   void dispose() {
     _inspectionSubscription?.cancel();
+    _equipmentSubscription?.cancel();   // NEU
     _checkDateController.dispose();
     super.dispose();
   }
@@ -108,6 +112,25 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
       print('Fehler beim Starten des Prüfungs-Streams: $e');
       if (mounted) setState(() => _isLoadingInspections = false);
     }
+  }
+
+
+  void _startEquipmentStream() {
+    _equipmentSubscription = _equipmentService
+        .getEquipmentById(widget.equipment.id)
+        .listen((equipment) {
+      if (equipment != null && mounted) {
+        setState(() {
+          _status = equipment.status;
+          _washCycles = equipment.washCycles;
+          _checkDate = equipment.checkDate;
+          _checkDateController.text =
+              DateFormat('dd.MM.yyyy').format(_checkDate);
+        });
+      }
+    }, onError: (e) {
+      print('Stream-Fehler Equipment: $e');
+    });
   }
 
   // ── Prüfstatus ────────────────────────────────────────────────────────────

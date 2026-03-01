@@ -76,6 +76,7 @@ class UserPermissions {
     );
   }
 
+  /// Liest flache perm_-Felder direkt aus dem Firestore-Dokument.
   factory UserPermissions.fromMap(Map<String, dynamic> map) {
     return UserPermissions(
       visibleFireStations: List<String>.from(map['visibleFireStations'] ?? []),
@@ -95,7 +96,8 @@ class UserPermissions {
       cleaningCreate: map['perm_cleaningCreate'] ?? false,
     );
   }
-// In UserPermissions.toMap() — flache Felder statt verschachteltem Objekt
+
+  /// Schreibt flache perm_-Felder — passend zu fromMap und saveUserPermissions.
   Map<String, dynamic> toMap() {
     return {
       'visibleFireStations': visibleFireStations,
@@ -192,6 +194,7 @@ class UserModel {
         station == fireStation;
   }
 
+  /// Schreibt Permissions als flache perm_-Felder direkt ins Dokument.
   Map<String, dynamic> toMap() {
     return {
       'uid': uid,
@@ -202,7 +205,8 @@ class UserModel {
       'isApproved': isApproved,
       'createdAt': createdAt,
       'approvedAt': approvedAt,
-      'permissions': permissions.toMap(),
+      // Permissions werden flach eingebettet (kein verschachteltes Objekt)
+      ...permissions.toMap(),
     };
   }
 
@@ -211,11 +215,17 @@ class UserModel {
     UserPermissions perms;
 
     if (role == 'admin') {
+      // Admins bekommen automatisch alle Rechte
       perms = UserPermissions.admin();
-    } else if (map['permissions'] != null) {
+    } else if (map['perm_equipmentView'] != null) {
+      // Neue flache Struktur: perm_-Felder direkt im Dokument
+      perms = UserPermissions.fromMap(map);
+    } else if (map['permissions'] is Map) {
+      // Alte verschachtelte Struktur: Rückwärtskompatibilität
       perms = UserPermissions.fromMap(
-          Map<String, dynamic>.from(map['permissions']));
+          Map<String, dynamic>.from(map['permissions'] as Map));
     } else {
+      // Kein Eintrag vorhanden → Standard-Rechte
       perms = UserPermissions.defaultUser();
     }
 

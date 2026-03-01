@@ -19,32 +19,56 @@ class UserPermissionsScreen extends StatefulWidget {
 }
 
 class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
-  late UserPermissions _permissions;
+  // _permissions wird aus dem Firestore-Stream befüllt und lokal bearbeitet.
+  // null = noch nicht geladen.
+  UserPermissions? _permissions;
   bool _isSaving = false;
-  bool _allStations = false;
+  bool _isDirty = false; // true sobald der User etwas geändert hat
 
   final PermissionService _permissionService = PermissionService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Stream auf das Firestore-Dokument des Users
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
   @override
   void initState() {
     super.initState();
-    _permissions = widget.user.permissions;
-    _allStations = _permissions.visibleFireStations.contains('*');
+    _userStream = _firestore
+        .collection('users')
+        .doc(widget.user.uid)
+        .snapshots();
+  }
+
+  /// Wird aufgerufen wenn der Stream ein neues Snapshot liefert.
+  /// Aktualisiert _permissions nur wenn der User gerade NICHT editiert
+  /// (d.h. keine ungespeicherten Änderungen vorliegen).
+  void _onSnapshotReceived(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    if (!snapshot.exists) return;
+    if (_isDirty) return; // keine externe Aktualisierung während Bearbeitung
+
+    final data = snapshot.data()!;
+    final loaded = UserPermissions.fromMap(data);
+    if (mounted) {
+      setState(() => _permissions = loaded);
+    }
   }
 
   Future<void> _save() async {
+    if (_permissions == null) return;
     setState(() => _isSaving = true);
     try {
       await _permissionService.saveUserPermissions(
-          widget.user.uid, _permissions);
+          widget.user.uid, _permissions!);
       if (mounted) {
+        setState(() => _isDirty = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Berechtigungen gespeichert'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -60,260 +84,279 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
     }
   }
 
+  void _update(UserPermissions updated) {
+    setState(() {
+      _permissions = updated;
+      _isDirty = true;
+    });
+  }
+
   void _toggleStation(String station) {
-    final current = List<String>.from(_permissions.visibleFireStations);
+    if (_permissions == null) return;
+    final current = List<String>.from(_permissions!.visibleFireStations);
     if (current.contains(station)) {
       current.remove(station);
     } else {
       current.add(station);
     }
-    setState(() {
-      _permissions = _permissions.copyWith(visibleFireStations: current);
-    });
+    _update(_permissions!.copyWith(visibleFireStations: current));
   }
 
-  void _setAllStations(bool value) {
-    setState(() {
-      _allStations = value;
-      if (value) {
-        _permissions = _permissions.copyWith(visibleFireStations: ['*']);
-      } else {
-        // Zurück auf eigene Feuerwehr
-        _permissions = _permissions.copyWith(
-            visibleFireStations: [widget.user.fireStation]);
-      }
-    });
+  void _toggleAllStations(bool all) {
+    if (_permissions == null) return;
+    _update(_permissions!.copyWith(
+      visibleFireStations: all ? ['*'] : [],
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.user.isAdmin) {
-      return _buildAdminHint();
-    }
+    if (widget.user.isAdmin) return _buildAdminHint();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Rechte: ${widget.user.name}'),
-        actions: [
-          if (_isSaving)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-            )
-          else
-            TextButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save, color: Colors.white),
-              label:
-                  const Text('Speichern', style: TextStyle(color: Colors.white)),
-            ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ── Benutzerinfo ─────────────────────────────────────────────────
-          _UserInfoCard(user: widget.user),
-          const SizedBox(height: 16),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _userStream,
+      builder: (context, snapshot) {
+        // Snapshot außerhalb des Build-Zyklus verarbeiten
+        if (snapshot.hasData && !_isDirty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _onSnapshotReceived(snapshot.data!);
+          });
+        }
 
-          // ── Sichtbare Ortswehren ──────────────────────────────────────────
-          _SectionCard(
-            title: 'Sichtbare Ortswehren',
-            icon: Icons.location_city,
-            iconColor: Colors.blue,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  title: const Text('Alle Ortswehren',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: const Text(
-                      'Benutzer kann alle Ortswehren sehen'),
-                  value: _allStations,
-                  onChanged: _setAllStations,
-                ),
-                if (!_allStations) ...[
-                  const Divider(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 4),
-                    child: Text(
-                      'Eigene Feuerwehr (${widget.user.fireStation}) ist immer sichtbar.',
-                      style: const TextStyle(
-                          fontSize: 12, fontStyle: FontStyle.italic),
-                    ),
+        // Noch kein Daten → Loading
+        if (_permissions == null) {
+          return Scaffold(
+            appBar: AppBar(title: Text('Rechte: ${widget.user.name}')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final allStations =
+            _permissions!.visibleFireStations.contains('*');
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('Rechte: ${widget.user.name}'),
+            actions: [
+              if (_isSaving)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  const SizedBox(height: 4),
-                  ...FireStations.all.map((station) {
-                    final isOwn = station == widget.user.fireStation;
-                    final isSelected = isOwn ||
-                        _permissions.visibleFireStations.contains(station);
-                    return CheckboxListTile(
+                )
+              else
+                TextButton(
+                  onPressed: _save,
+                  child: const Text(
+                    'Speichern',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+            ],
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // ── Benutzer-Info ───────────────────────────────────────────
+              _UserInfoCard(user: widget.user),
+              const SizedBox(height: 16),
+
+              // ── Sichtbare Ortswehren ────────────────────────────────────
+              _SectionCard(
+                title: 'Sichtbare Ortswehren',
+                icon: Icons.location_city,
+                iconColor: Colors.blue,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile(
                       dense: true,
-                      title: Text(
-                        station,
-                        style: TextStyle(
-                            fontWeight: isOwn
-                                ? FontWeight.bold
-                                : FontWeight.normal),
+                      title: const Text('Alle Ortswehren sehen'),
+                      value: allStations,
+                      onChanged: _toggleAllStations,
+                    ),
+                    if (!allStations) ...[
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        child: Text(
+                          'Die eigene Ortswehr ist immer sichtbar.',
+                          style: const TextStyle(
+                              fontSize: 12, fontStyle: FontStyle.italic),
+                        ),
                       ),
-                      subtitle: isOwn
-                          ? const Text('Eigene Feuerwehr',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontStyle: FontStyle.italic))
-                          : null,
-                      value: isSelected,
-                      onChanged:
-                          isOwn ? null : (_) => _toggleStation(station),
-                    );
-                  }),
+                      const SizedBox(height: 4),
+                      ...FireStations.all.map((station) {
+                        final isOwn = station == widget.user.fireStation;
+                        final isSelected = isOwn ||
+                            _permissions!.visibleFireStations
+                                .contains(station);
+                        return CheckboxListTile(
+                          dense: true,
+                          title: Text(
+                            station,
+                            style: TextStyle(
+                                fontWeight: isOwn
+                                    ? FontWeight.bold
+                                    : FontWeight.normal),
+                          ),
+                          subtitle: isOwn
+                              ? const Text('Eigene Feuerwehr',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontStyle: FontStyle.italic))
+                              : null,
+                          value: isSelected,
+                          onChanged:
+                              isOwn ? null : (_) => _toggleStation(station),
+                        );
+                      }),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── Einsatzkleidung ─────────────────────────────────────────
+              _PermissionsGroup(
+                title: 'Einsatzkleidung',
+                icon: Icons.checkroom,
+                iconColor: Colors.orange,
+                rows: [
+                  _PermRow(
+                    label: 'Einsehen',
+                    value: _permissions!.equipmentView,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(equipmentView: v)),
+                  ),
+                  _PermRow(
+                    label: 'Bearbeiten',
+                    value: _permissions!.equipmentEdit,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(equipmentEdit: v)),
+                  ),
+                  _PermRow(
+                    label: 'Hinzufügen',
+                    value: _permissions!.equipmentAdd,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(equipmentAdd: v)),
+                  ),
+                  _PermRow(
+                    label: 'Löschen',
+                    value: _permissions!.equipmentDelete,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(equipmentDelete: v)),
+                    isDangerous: true,
+                  ),
                 ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 12),
 
-          // ── Einsatzkleidung ───────────────────────────────────────────────
-          _PermissionsGroup(
-            title: 'Einsatzkleidung',
-            icon: Icons.checkroom,
-            iconColor: Colors.orange,
-            rows: [
-              _PermRow(
-                label: 'Einsehen',
-                value: _permissions.equipmentView,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(equipmentView: v)),
+              // ── Einsätze ────────────────────────────────────────────────
+              _PermissionsGroup(
+                title: 'Einsätze',
+                icon: Icons.local_fire_department,
+                iconColor: Colors.red,
+                rows: [
+                  _PermRow(
+                    label: 'Einsehen',
+                    value: _permissions!.missionView,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(missionView: v)),
+                  ),
+                  _PermRow(
+                    label: 'Bearbeiten',
+                    value: _permissions!.missionEdit,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(missionEdit: v)),
+                  ),
+                  _PermRow(
+                    label: 'Hinzufügen',
+                    value: _permissions!.missionAdd,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(missionAdd: v)),
+                  ),
+                  _PermRow(
+                    label: 'Löschen',
+                    value: _permissions!.missionDelete,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(missionDelete: v)),
+                    isDangerous: true,
+                  ),
+                ],
               ),
-              _PermRow(
-                label: 'Bearbeiten',
-                value: _permissions.equipmentEdit,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(equipmentEdit: v)),
+              const SizedBox(height: 12),
+
+              // ── Prüfungen ───────────────────────────────────────────────
+              _PermissionsGroup(
+                title: 'Prüfungen',
+                icon: Icons.fact_check,
+                iconColor: Colors.green,
+                rows: [
+                  _PermRow(
+                    label: 'Einsehen',
+                    value: _permissions!.inspectionView,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(inspectionView: v)),
+                  ),
+                  _PermRow(
+                    label: 'Bearbeiten',
+                    value: _permissions!.inspectionEdit,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(inspectionEdit: v)),
+                  ),
+                  _PermRow(
+                    label: 'Löschen',
+                    value: _permissions!.inspectionDelete,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(inspectionDelete: v)),
+                    isDangerous: true,
+                  ),
+                  _PermRow(
+                    label: 'Prüfungen durchführen',
+                    value: _permissions!.inspectionPerform,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(inspectionPerform: v)),
+                  ),
+                ],
               ),
-              _PermRow(
-                label: 'Hinzufügen',
-                value: _permissions.equipmentAdd,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(equipmentAdd: v)),
+              const SizedBox(height: 12),
+
+              // ── Reinigung ───────────────────────────────────────────────
+              _PermissionsGroup(
+                title: 'Reinigung',
+                icon: Icons.local_laundry_service,
+                iconColor: Colors.purple,
+                rows: [
+                  _PermRow(
+                    label: 'Einsehen',
+                    value: _permissions!.cleaningView,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(cleaningView: v)),
+                  ),
+                  _PermRow(
+                    label: 'Reinigungsscheine erstellen',
+                    value: _permissions!.cleaningCreate,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(cleaningCreate: v)),
+                  ),
+                ],
               ),
-              _PermRow(
-                label: 'Löschen',
-                value: _permissions.equipmentDelete,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(equipmentDelete: v)),
-                isDangerous: true,
+              const SizedBox(height: 32),
+
+              // ── Schnellvorlagen ─────────────────────────────────────────
+              _QuickTemplatesSection(
+                onApply: _update,
+                userFireStation: widget.user.fireStation,
               ),
+              const SizedBox(height: 32),
             ],
           ),
-          const SizedBox(height: 12),
-
-          // ── Einsätze ──────────────────────────────────────────────────────
-          _PermissionsGroup(
-            title: 'Einsätze',
-            icon: Icons.local_fire_department,
-            iconColor: Colors.red,
-            rows: [
-              _PermRow(
-                label: 'Einsehen',
-                value: _permissions.missionView,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(missionView: v)),
-              ),
-              _PermRow(
-                label: 'Bearbeiten',
-                value: _permissions.missionEdit,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(missionEdit: v)),
-              ),
-              _PermRow(
-                label: 'Hinzufügen',
-                value: _permissions.missionAdd,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(missionAdd: v)),
-              ),
-              _PermRow(
-                label: 'Löschen',
-                value: _permissions.missionDelete,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(missionDelete: v)),
-                isDangerous: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // ── Prüfungen ─────────────────────────────────────────────────────
-          _PermissionsGroup(
-            title: 'Prüfungen',
-            icon: Icons.fact_check,
-            iconColor: Colors.green,
-            rows: [
-              _PermRow(
-                label: 'Einsehen',
-                value: _permissions.inspectionView,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(inspectionView: v)),
-              ),
-              _PermRow(
-                label: 'Prüfung durchführen',
-                value: _permissions.inspectionPerform,
-                onChanged: (v) => setState(() =>
-                    _permissions =
-                        _permissions.copyWith(inspectionPerform: v)),
-              ),
-              _PermRow(
-                label: 'Bearbeiten',
-                value: _permissions.inspectionEdit,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(inspectionEdit: v)),
-              ),
-              _PermRow(
-                label: 'Löschen',
-                value: _permissions.inspectionDelete,
-                onChanged: (v) => setState(() =>
-                    _permissions =
-                        _permissions.copyWith(inspectionDelete: v)),
-                isDangerous: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // ── Reinigung ─────────────────────────────────────────────────────
-          _PermissionsGroup(
-            title: 'Reinigung',
-            icon: Icons.local_laundry_service,
-            iconColor: Colors.teal,
-            rows: [
-              _PermRow(
-                label: 'Reinigungsscheine einsehen',
-                value: _permissions.cleaningView,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(cleaningView: v)),
-              ),
-              _PermRow(
-                label: 'Reinigungsscheine erstellen',
-                value: _permissions.cleaningCreate,
-                onChanged: (v) => setState(() =>
-                    _permissions = _permissions.copyWith(cleaningCreate: v)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-
-          // ── Schnellvorlagen ───────────────────────────────────────────────
-          _QuickTemplatesSection(
-            onApply: (perms) => setState(() => _permissions = perms),
-            userFireStation: widget.user.fireStation,
-          ),
-          const SizedBox(height: 32),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -506,8 +549,7 @@ class _QuickTemplatesSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Schnellvorlagen',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text(
               'Wende eine Vorlage an und passe anschließend Details an.',
@@ -539,22 +581,6 @@ class _QuickTemplatesSection extends StatelessWidget {
                     missionAdd: true,
                     inspectionView: true,
                     inspectionPerform: true,
-                    inspectionEdit: true,
-                    cleaningView: true,
-                    cleaningCreate: true,
-                  )),
-                ),
-                _TemplateChip(
-                  label: 'Hygieneeinheit',
-                  icon: Icons.local_laundry_service,
-                  onTap: () => onApply(UserPermissions(
-                    visibleFireStations: const ['*'],
-                    equipmentView: true,
-                    equipmentEdit: true,
-                    missionView: true,
-                    missionAdd: true,
-                    inspectionView: true,
-                    inspectionPerform: true,
                     cleaningView: true,
                     cleaningCreate: true,
                   )),
@@ -562,7 +588,6 @@ class _QuickTemplatesSection extends StatelessWidget {
                 _TemplateChip(
                   label: 'Alle Rechte',
                   icon: Icons.admin_panel_settings,
-                  color: Colors.deepOrange,
                   onTap: () => onApply(UserPermissions(
                     visibleFireStations: const ['*'],
                     equipmentView: true,
@@ -584,7 +609,6 @@ class _QuickTemplatesSection extends StatelessWidget {
                 _TemplateChip(
                   label: 'Zurücksetzen',
                   icon: Icons.restart_alt,
-                  color: Colors.grey,
                   onTap: () => onApply(UserPermissions.defaultUser()),
                 ),
               ],
@@ -600,21 +624,18 @@ class _TemplateChip extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  final Color? color;
 
   const _TemplateChip({
     required this.label,
     required this.icon,
     required this.onTap,
-    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? Theme.of(context).colorScheme.primary;
     return ActionChip(
-      avatar: Icon(icon, size: 16, color: c),
-      label: Text(label, style: TextStyle(color: c)),
+      avatar: Icon(icon, size: 16),
+      label: Text(label),
       onPressed: onTap,
     );
   }

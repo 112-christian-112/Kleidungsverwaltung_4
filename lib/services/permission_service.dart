@@ -84,7 +84,8 @@ class PermissionService {
 
   // Reinigung
   Future<bool> canViewCleaning() async => (await _permissions()).cleaningView;
-  Future<bool> canCreateCleaning() async => (await _permissions()).cleaningCreate;
+  Future<bool> canCreateCleaning() async =>
+      (await _permissions()).cleaningCreate;
 
   // ── Sichtbare Ortswehren ──────────────────────────────────────────────────
 
@@ -106,11 +107,14 @@ class PermissionService {
 
   // ── Admin: Permissions eines anderen Users speichern ─────────────────────
 
+  /// Speichert die Permissions als flache perm_-Felder direkt im
+  /// Firestore-Dokument — konsistent mit [UserPermissions.fromMap].
   Future<void> saveUserPermissions(
       String userId, UserPermissions permissions) async {
-    await _firestore.collection('users').doc(userId).update(
-          permissions.toMap(),
-        );
+    await _firestore
+        .collection('users')
+        .doc(userId)
+        .update(permissions.toMap()); // toMap() liefert flache perm_-Felder
   }
 
   Future<bool> canViewUserRoles() async => isAdmin();
@@ -118,97 +122,49 @@ class PermissionService {
   // ── Altes String-basiertes Interface (Kompatibilität) ────────────────────
   //
   // Screens die noch nicht migriert sind, können weiterhin
-  // canPerformAction('edit_equipment') aufrufen. Neue Screens sollen
-  // stattdessen getCurrentUser() + UserModel-Properties verwenden.
+  // canPerformAction('edit_equipment') aufrufen.
 
   Future<bool> canPerformAction(String action) async {
-    final p = await _permissions();
+    final perms = await _permissions();
     switch (action) {
-      case 'view_all_equipment':
       case 'view_equipment':
-        return p.equipmentView;
+        return perms.equipmentView;
       case 'edit_equipment':
-        return p.equipmentEdit;
+        return perms.equipmentEdit;
       case 'add_equipment':
-        return p.equipmentAdd;
+        return perms.equipmentAdd;
       case 'delete_equipment':
-        return p.equipmentDelete;
-      case 'view_all_missions':
+        return perms.equipmentDelete;
       case 'view_missions':
-        return p.missionView;
+        return perms.missionView;
       case 'edit_missions':
-        return p.missionEdit;
+        return perms.missionEdit;
       case 'add_missions':
-        return p.missionAdd;
+        return perms.missionAdd;
       case 'delete_missions':
-        return p.missionDelete;
-      case 'view_all_inspections':
+        return perms.missionDelete;
       case 'view_inspections':
-        return p.inspectionView;
+        return perms.inspectionView;
       case 'edit_inspections':
-        return p.inspectionEdit;
+        return perms.inspectionEdit;
       case 'delete_inspections':
-        return p.inspectionDelete;
+        return perms.inspectionDelete;
       case 'perform_inspections':
-        return p.inspectionPerform;
-      case 'view_cleaning_receipts':
-        return p.cleaningView;
-      case 'generate_cleaning_receipts':
-        return p.cleaningCreate;
-      case 'update_equipment_status':
-      case 'update_wash_cycles':
-      case 'update_check_date':
-        return p.equipmentEdit;
+        return perms.inspectionPerform;
+      case 'view_cleaning':
+        return perms.cleaningView;
+      case 'create_cleaning':
+        return perms.cleaningCreate;
       default:
         return false;
     }
   }
 
-  // ── Alte rollenbasierte Methoden (Kompatibilität) ─────────────────────────
-  //
-  // Diese Methoden existieren noch, damit Screens die noch nicht
-  // umgestellt wurden nicht brechen. Sie lesen intern über das neue
-  // UserModel — kein direkter Rollen-String-Vergleich mehr.
-
-  /// @deprecated Nutze stattdessen getCurrentUser() und user.isAdmin
-  Future<bool> isHygieneUnit() async {
-    final user = await _fetchCurrentUser();
-    // Hygieneeinheit hat cleaningCreate-Recht aber ist kein Admin
-    return user != null &&
-        !user.isAdmin &&
-        user.permissions.cleaningCreate == true;
-  }
-
-  /// @deprecated Nutze stattdessen getCurrentUser() und user.permissions
-  Future<bool> isOrtszeugwart() async {
-    final user = await _fetchCurrentUser();
-    // Ortszeugwart: hat Equipment-Edit-Recht aber ist kein Admin
-    return user != null &&
-        !user.isAdmin &&
-        user.permissions.equipmentEdit == true;
-  }
-
-  /// @deprecated Nutze stattdessen canViewEquipment()
-  Future<bool> hasExtendedReadAccess() async {
+  /// Kompatibilitäts-Methode für Screens, die noch canViewAllMissions() nutzen.
+  Future<bool> canViewAllMissions() async {
     final user = await _fetchCurrentUser();
     if (user == null) return false;
-    return user.isAdmin || user.permissions.equipmentView;
-  }
-
-  /// @deprecated Nutze stattdessen canViewEquipment()
-  Future<bool> canViewAllEquipment() async => canViewEquipment();
-
-  /// @deprecated Nutze stattdessen canViewMissions()
-  Future<bool> canViewAllMissions() async => canViewMissions();
-
-  // ── Hilfsmethode ─────────────────────────────────────────────────────────
-
-  String getRoleDisplayName(String role) {
-    switch (role) {
-      case 'admin':
-        return 'Administrator';
-      default:
-        return 'Benutzer';
-    }
+    if (user.isAdmin) return true;
+    return user.permissions.visibleFireStations.contains('*');
   }
 }

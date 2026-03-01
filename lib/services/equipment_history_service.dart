@@ -3,12 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/equipment_history_model.dart';
 import '../models/equipment_model.dart';
+import 'permission_service.dart';
 
 class EquipmentHistoryService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final PermissionService _permissionService = PermissionService();
 
-  // Fügt einen neuen Historien-Eintrag hinzu
+  /// Fügt einen Historien-Eintrag hinzu.
+  /// Nutzt PermissionService statt direktem Firestore-Read für den Benutzernamen.
   Future<DocumentReference> addHistoryEntry({
     required String equipmentId,
     required String action,
@@ -17,21 +20,19 @@ class EquipmentHistoryService {
     dynamic newValue,
   }) async {
     try {
-      // Aktuellen Benutzer ermitteln
-      User? currentUser = _auth.currentUser;
+      final currentUser = _auth.currentUser;
       if (currentUser == null) {
         throw Exception('Kein Benutzer angemeldet');
       }
 
-      // Benutzername aus Firestore holen
-      DocumentSnapshot userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
-      String userName = userDoc.exists
-          ? (userDoc.data() as Map<String, dynamic>)['name'] ?? currentUser.email ?? 'Unbekannt'
+      // Benutzername über PermissionService holen (kein extra Firestore-Read)
+      final userModel = await _permissionService.getCurrentUser();
+      final userName = userModel?.name.isNotEmpty == true
+          ? userModel!.name
           : currentUser.email ?? 'Unbekannt';
 
-      // Historien-Eintrag erstellen
-      EquipmentHistoryModel historyEntry = EquipmentHistoryModel(
-        id: '', // Wird von Firestore generiert
+      final historyEntry = EquipmentHistoryModel(
+        id: '',
         equipmentId: equipmentId,
         action: action,
         field: field,
@@ -42,14 +43,14 @@ class EquipmentHistoryService {
         performedByName: userName,
       );
 
-      // In Firestore speichern
-      return await _firestore.collection('equipment_history').add(historyEntry.toMap());
+      return await _firestore
+          .collection('equipment_history')
+          .add(historyEntry.toMap());
     } catch (e) {
       throw Exception('Fehler beim Hinzufügen des Historien-Eintrags: $e');
     }
   }
 
-  // Holt die Historie für ein bestimmtes Equipment-Element
   Stream<List<EquipmentHistoryModel>> getEquipmentHistory(String equipmentId) {
     return _firestore
         .collection('equipment_history')
@@ -57,12 +58,11 @@ class EquipmentHistoryService {
         .orderBy('timestamp', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => EquipmentHistoryModel.fromMap(
-        doc.data() as Map<String, dynamic>, doc.id))
-        .toList());
+            .map((doc) => EquipmentHistoryModel.fromMap(
+                doc.data() as Map<String, dynamic>, doc.id))
+            .toList());
   }
 
-  // Erfasst die Erstellung eines neuen Equipment-Elements
   Future<void> recordEquipmentCreation(EquipmentModel equipment) async {
     try {
       await addHistoryEntry(
@@ -73,11 +73,9 @@ class EquipmentHistoryService {
       );
     } catch (e) {
       print('Fehler beim Aufzeichnen der Ausrüstungserstellung: $e');
-      // Wir werfen hier keine Exception, damit die Hauptoperation fortgesetzt werden kann
     }
   }
 
-  // Erfasst eine Feldaktualisierung
   Future<void> recordFieldUpdate({
     required String equipmentId,
     required String field,
@@ -97,7 +95,6 @@ class EquipmentHistoryService {
     }
   }
 
-  // Erfasst die Löschung eines Equipment-Elements
   Future<void> recordEquipmentDeletion(EquipmentModel equipment) async {
     try {
       await addHistoryEntry(

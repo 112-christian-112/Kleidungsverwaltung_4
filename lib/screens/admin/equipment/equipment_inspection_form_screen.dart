@@ -7,10 +7,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/equipment_model.dart';
 import '../../../models/equipment_inspection_model.dart';
 import '../../../services/equipment_inspection_service.dart';
+import '../../../services/permission_service.dart';
 
 class EquipmentInspectionFormScreen extends StatefulWidget {
   final EquipmentModel equipment;
   final EquipmentInspectionModel? existingInspection; // Für Bearbeitung
+
 
   const EquipmentInspectionFormScreen({
     Key? key,
@@ -23,6 +25,7 @@ class EquipmentInspectionFormScreen extends StatefulWidget {
 }
 
 class _EquipmentInspectionFormScreenState extends State<EquipmentInspectionFormScreen> {
+  final PermissionService _permissionService = PermissionService();
   final _formKey = GlobalKey<FormState>();
   final EquipmentInspectionService _inspectionService = EquipmentInspectionService();
 
@@ -144,22 +147,12 @@ class _EquipmentInspectionFormScreenState extends State<EquipmentInspectionFormS
 
   Future<void> _loadUserData() async {
     try {
-      User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUser.uid)
-            .get();
-
-        if (userDoc.exists) {
-          Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-          if (!_isEditing) {
-            setState(() {
-              _inspector = userData['name'] ?? '';
-              _inspectorController.text = _inspector;
-            });
-          }
-        }
+      final user = await _permissionService.getCurrentUser();
+      if (user != null && !_isEditing) {
+        setState(() {
+          _inspector = user.name.isNotEmpty ? user.name : user.email;
+          _inspectorController.text = _inspector;
+        });
       }
     } catch (e) {
       print('Fehler beim Laden der Benutzerdaten: $e');
@@ -333,11 +326,7 @@ class _EquipmentInspectionFormScreenState extends State<EquipmentInspectionFormS
         throw Exception('Kein Benutzer angemeldet');
       }
 
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
+      final userModel = await _permissionService.getCurrentUser();
 
       EquipmentInspectionModel inspection = EquipmentInspectionModel(
         id: _isEditing ? widget.existingInspection!.id : '', // Für Update
@@ -349,7 +338,9 @@ class _EquipmentInspectionFormScreenState extends State<EquipmentInspectionFormS
         nextInspectionDate: _nextInspectionDate,
         issues: _issues.isNotEmpty ? _issues : null,
         createdAt: _isEditing ? widget.existingInspection!.createdAt : DateTime.now(),
-        createdBy: userData['name'] ?? currentUser.email ?? '',
+        createdBy: userModel?.name.isNotEmpty == true
+            ? userModel!.name
+            : userModel?.email ?? '',
       );
 
       if (_isEditing) {

@@ -1,4 +1,3 @@
-// 2. Service für die Prüfungen
 // services/equipment_inspection_service.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,69 +5,158 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/equipment_inspection_model.dart';
 import '../models/equipment_model.dart';
 import 'equipment_service.dart';
+import 'equipment_history_service.dart';
+import 'permission_service.dart';
 
 class EquipmentInspectionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final EquipmentService _equipmentService = EquipmentService();
+  final EquipmentHistoryService _historyService = EquipmentHistoryService();
+  final PermissionService _permissionService = PermissionService();
 
-  // Neue Prüfung hinzufügen
-  Future<DocumentReference> addInspection(EquipmentInspectionModel inspection) async {
-    User? currentUser = _auth.currentUser;
+  // ── Schreib-Methoden ──────────────────────────────────────────────────────
 
-    if (currentUser == null) {
+  /// Neue Prüfung speichern + Equipment-Status, Prüfdatum, Waschzyklen
+  /// und History aktualisieren.
+  Future<DocumentReference> addInspection(
+      EquipmentInspectionModel inspection) async {
+    if (_auth.currentUser == null) {
       throw Exception('Kein Benutzer angemeldet');
     }
 
-    // Prüfung in Firestore speichern
-    DocumentReference docRef = await _firestore.collection('equipment_inspections').add(inspection.toMap());
+    // 1. Aktuellen Equipment-Zustand lesen (für Waschzyklus- und History-Logik)
+    final equipmentDoc = await _firestore
+        .collection('equipment')
+        .doc(inspection.equipmentId)
+        .get();
+    final currentStatus =
+        (equipmentDoc.data()?['status'] as String?) ?? '';
+    final currentWashCycles =
+        (equipmentDoc.data()?['washCycles'] as int?) ?? 0;
 
-    // Prüfdatum in der Einsatzkleidung aktualisieren
-    await _equipmentService.updateCheckDate(inspection.equipmentId, inspection.nextInspectionDate);
+    // 2. Prüfung speichern
+    final docRef = await _firestore
+        .collection('equipment_inspections')
+        .add(inspection.toMap());
 
-    // Bei Durchfall den Status der Einsatzkleidung auf "In Reparatur" oder "Ausgemustert" setzen
-    if (inspection.result == InspectionResult.failed) {
-      await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.repair);
+    // 3. Prüfdatum setzen
+    await _equipmentService.updateCheckDate(
+        inspection.equipmentId, inspection.nextInspectionDate);
+
+    // 4. Status setzen
+    final newStatus = _statusFromResult(inspection.result);
+    await _equipmentService.updateStatus(inspection.equipmentId, newStatus);
+
+    // 5. Waschzyklen hochzählen wenn Kleidungsstück aus Reinigung kam
+    final fromCleaning = currentStatus == EquipmentStatus.cleaning;
+    if (fromCleaning) {
+      await _equipmentService.updateWashCycles(
+          inspection.equipmentId, currentWashCycles + 1);
     }
-    else if (inspection.result == InspectionResult.passed) {
-      await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.ready);
-    }
-    else if (inspection.result == InspectionResult.conditionalPass) {
-      await _equipmentService.updateStatus(inspection.equipmentId, EquipmentStatus.ready);
+
+    // 6. History-Einträge schreiben (best-effort, Fehler nicht weiterwerfen)
+    try {
+      await _historyService.recordFieldUpdate(
+        equipmentId: inspection.equipmentId,
+        field: 'Prüfung',
+        oldValue: null,
+        newValue: 'Prüfung durchgeführt — ${_resultText(inspection.result)}',
+      );
+      if (fromCleaning) {
+        await _historyService.recordFieldUpdate(
+          equipmentId: inspection.equipmentId,
+          field: 'Waschzyklen',
+          oldValue: currentWashCycles,
+          newValue: currentWashCycles + 1,
+        );
+      }
+    } catch (e) {
+      print('History-Fehler (nicht kritisch): $e');
     }
 
     return docRef;
   }
 
-  // Prüfungen für ein bestimmtes Equipment abrufen
-  Stream<List<EquipmentInspectionModel>> getInspectionsForEquipment(String equipmentId) {
+  /// Bestehende Prüfung aktualisieren + Equipment-Status, Prüfdatum
+  /// und History synchron halten.
+  Future<void> updateInspection(EquipmentInspectionModel inspection) async {
+    if (_auth.currentUser == null) {
+      throw Exception('Kein Benutzer angemeldet');
+    }
+
+    // Alten Status für History lesen
+    final equipmentDoc = await _firestore
+        .collection('equipment')
+        .doc(inspection.equipmentId)
+        .get();
+    final oldStatus = (equipmentDoc.data()?['status'] as String?) ?? '';
+
+    // 1. Prüfungsdokument aktualisieren
+    await _firestore
+        .collection('equipment_inspections')
+        .doc(inspection.id)
+        .update(inspection.toMap());
+
+    // 2. Prüfdatum aktualisieren
+    await _equipmentService.updateCheckDate(
+        inspection.equipmentId, inspection.nextInspectionDate);
+
+    // 3. Status aktualisieren
+    final newStatus = _statusFromResult(inspection.result);
+    await _equipmentService.updateStatus(inspection.equipmentId, newStatus);
+
+    // 4. History-Einträge schreiben (best-effort)
+    try {
+      await _historyService.recordFieldUpdate(
+        equipmentId: inspection.equipmentId,
+        field: 'Prüfung',
+        oldValue: null,
+        newValue: 'Prüfung bearbeitet — ${_resultText(inspection.result)}',
+      );
+    } catch (e) {
+      print('History-Fehler (nicht kritisch): $e');
+    }
+  }
+
+  /// Prüfung löschen.
+  /// Equipment-Status wird nicht zurückgesetzt — muss manuell geprüft werden.
+  Future<void> deleteInspection(String inspectionId) async {
+    await _firestore
+        .collection('equipment_inspections')
+        .doc(inspectionId)
+        .delete();
+  }
+
+  // ── Lese-Methoden ─────────────────────────────────────────────────────────
+
+  Stream<List<EquipmentInspectionModel>> getInspectionsForEquipment(
+      String equipmentId) {
     return _firestore
         .collection('equipment_inspections')
         .where('equipmentId', isEqualTo: equipmentId)
         .orderBy('inspectionDate', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => EquipmentInspectionModel.fromMap(
-        doc.data() as Map<String, dynamic>, doc.id))
-        .toList());
+            .map((doc) => EquipmentInspectionModel.fromMap(
+                doc.data() as Map<String, dynamic>, doc.id))
+            .toList());
   }
 
-  // Alle Prüfungen abrufen (für Admin-Übersicht)
   Stream<List<EquipmentInspectionModel>> getAllInspections() {
     return _firestore
         .collection('equipment_inspections')
         .orderBy('inspectionDate', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => EquipmentInspectionModel.fromMap(
-        doc.data() as Map<String, dynamic>, doc.id))
-        .toList());
+            .map((doc) => EquipmentInspectionModel.fromMap(
+                doc.data() as Map<String, dynamic>, doc.id))
+            .toList());
   }
 
-  // Nächste anstehende Prüfungen abrufen
   Stream<List<EquipmentInspectionModel>> getUpcomingInspections() {
-    final DateTime now = DateTime.now();
-    final DateTime threeMonthsFromNow = now.add(const Duration(days: 90));
+    final now = DateTime.now();
+    final threeMonthsFromNow = now.add(const Duration(days: 90));
 
     return _firestore
         .collection('equipment_inspections')
@@ -77,35 +165,32 @@ class EquipmentInspectionService {
         .orderBy('nextInspectionDate')
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => EquipmentInspectionModel.fromMap(
-        doc.data() as Map<String, dynamic>, doc.id))
-        .toList());
+            .map((doc) => EquipmentInspectionModel.fromMap(
+                doc.data() as Map<String, dynamic>, doc.id))
+            .toList());
   }
 
-  // Prüfung aktualisieren
-  Future<void> updateInspection(EquipmentInspectionModel inspection) async {
-    await _firestore
-        .collection('equipment_inspections')
-        .doc(inspection.id)
-        .update(inspection.toMap());
-  }
+  // ── Hilfsmethoden ─────────────────────────────────────────────────────────
 
-  // Prüfung löschen
-  Future<void> deleteInspection(String inspectionId) async {
-    await _firestore.collection('equipment_inspections').doc(inspectionId).delete();
-  }
-
-
-  // PRIVATE HILFSMETHODE: Status basierend auf Prüfergebnis bestimmen
-  String _getNewStatusFromResult(InspectionResult result) {
+  String _statusFromResult(InspectionResult result) {
     switch (result) {
       case InspectionResult.passed:
-        return 'Einsatzbereit'; // Bestanden = Einsatzbereit
+        return EquipmentStatus.ready;
       case InspectionResult.conditionalPass:
-        return 'Einsatzbereit'; // Bedingt bestanden = auch Einsatzbereit
+        return EquipmentStatus.ready;
       case InspectionResult.failed:
-        return 'In Reparatur'; // Durchgefallen = In Reparatur
+        return EquipmentStatus.repair;
+    }
+  }
+
+  String _resultText(InspectionResult result) {
+    switch (result) {
+      case InspectionResult.passed:
+        return 'Bestanden';
+      case InspectionResult.conditionalPass:
+        return 'Bedingt bestanden';
+      case InspectionResult.failed:
+        return 'Durchgefallen';
     }
   }
 }
-
