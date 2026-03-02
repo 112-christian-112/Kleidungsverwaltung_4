@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../Lists/fire_stations.dart';
 import '../services/auth_service.dart';
-import '../services/pending_approval_screen.dart';
 
 class ProfileCompletionScreen extends StatefulWidget {
   const ProfileCompletionScreen({Key? key}) : super(key: key);
@@ -61,17 +60,10 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
         _selectedFireStation,
       );
 
-      // Explizit zum PendingApprovalScreen navigieren und den
-      // gesamten Stack leeren — egal ob dieser Screen via push
-      // oder als main.dart home aufgerufen wurde.
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const PendingApprovalScreen(),
-          ),
-          (route) => false,
-        );
-      }
+      // watchUserStatus erkennt isProfileComplete: true →
+      // StreamBuilder in main.dart wechselt automatisch zu PendingApprovalScreen.
+      // KEINE manuelle Navigation — der Screen wird vom StreamBuilder ersetzt.
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -118,8 +110,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 24),
-
-                // Name
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
@@ -135,8 +125,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-
-                // Rolle
                 DropdownButtonFormField<String>(
                   value: _selectedRole,
                   decoration: const InputDecoration(
@@ -155,8 +143,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       : null,
                 ),
                 const SizedBox(height: 16),
-
-                // Ortsfeuerwehr
                 DropdownButtonFormField<String>(
                   value: _selectedFireStation,
                   decoration: const InputDecoration(
@@ -175,7 +161,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                       : null,
                 ),
                 const SizedBox(height: 32),
-
                 ElevatedButton(
                   onPressed: _isLoading ? null : _completeProfile,
                   style: ElevatedButton.styleFrom(

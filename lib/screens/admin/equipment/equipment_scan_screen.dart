@@ -20,7 +20,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   EquipmentModel? _foundEquipment;
-  List<EquipmentModel> _searchResults = []; // Neue Liste für mehrere Suchergebnisse
+  List<EquipmentModel> _searchResults = [];
   String _errorMessage = '';
 
   @override
@@ -34,7 +34,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     setState(() {
       _isLoading = true;
       _foundEquipment = null;
-      _searchResults = []; // Liste leeren
+      _searchResults = [];
       _errorMessage = '';
     });
 
@@ -67,7 +67,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     setState(() {
       _isLoading = true;
       _foundEquipment = null;
-      _searchResults = []; // Liste leeren
+      _searchResults = [];
       _errorMessage = '';
     });
 
@@ -100,7 +100,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     setState(() {
       _isLoading = true;
       _foundEquipment = null;
-      _searchResults = []; // Liste leeren
+      _searchResults = [];
       _errorMessage = '';
     });
 
@@ -113,7 +113,6 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
         if (equipment != null) {
           _foundEquipment = equipment;
         } else {
-          // Keine exakte Übereinstimmung gefunden, nach Teilübereinstimmungen suchen
           _searchByPartialMatch(nfcTag);
         }
       });
@@ -130,7 +129,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     setState(() {
       _isLoading = true;
       _foundEquipment = null;
-      _searchResults = []; // Liste leeren
+      _searchResults = [];
       _errorMessage = '';
     });
 
@@ -143,7 +142,6 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
         if (equipment != null) {
           _foundEquipment = equipment;
         } else {
-          // Keine exakte Übereinstimmung gefunden, nach Teilübereinstimmungen suchen
           _searchByPartialMatch(barcode);
         }
       });
@@ -162,17 +160,16 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     });
 
     try {
-      final results = await _equipmentService.searchEquipmentByPartialTagOrBarcode(searchString);
+      final results = await _equipmentService
+          .searchEquipmentByPartialTagOrBarcode(searchString);
 
       setState(() {
         _isLoading = false;
 
         if (results.isNotEmpty) {
           if (results.length == 1) {
-            // Nur ein Ergebnis gefunden
             _foundEquipment = results.first;
           } else {
-            // Mehrere Ergebnisse gefunden
             _searchResults = results;
           }
         } else {
@@ -199,15 +196,14 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     setState(() {
       _isLoading = true;
       _foundEquipment = null;
-      _searchResults = []; // Liste leeren
+      _searchResults = [];
       _errorMessage = '';
     });
 
     try {
-      // Zuerst nach NFC-Tag suchen
-      var equipment = await _equipmentService.getEquipmentByNfcTag(_searchQuery);
+      var equipment =
+          await _equipmentService.getEquipmentByNfcTag(_searchQuery);
 
-      // Wenn nichts gefunden wurde, nach Barcode suchen
       if (equipment == null) {
         equipment = await _equipmentService.getEquipmentByBarcode(_searchQuery);
       }
@@ -218,7 +214,6 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
           _foundEquipment = equipment;
         });
       } else {
-        // Keine exakte Übereinstimmung gefunden, nach Teilübereinstimmungen suchen
         await _searchByPartialMatch(_searchQuery);
       }
     } catch (e) {
@@ -254,11 +249,11 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
           ),
         ),
       ).then((value) {
-        // Nach Rückkehr von der Prüfungsseite aktualisieren wir die Daten
         if (value == true && _foundEquipment != null) {
           if (_foundEquipment!.nfcTag.isNotEmpty) {
             _searchByNfcTag(_foundEquipment!.nfcTag);
-          } else if (_foundEquipment!.barcode != null && _foundEquipment!.barcode!.isNotEmpty) {
+          } else if (_foundEquipment!.barcode != null &&
+              _foundEquipment!.barcode!.isNotEmpty) {
             _searchByBarcode(_foundEquipment!.barcode!);
           }
         }
@@ -288,9 +283,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
             const SizedBox(height: 8),
             const Text(
               'Scannen Sie den NFC-Tag oder Barcode der Einsatzkleidung, um diese zu identifizieren und Aktionen durchzuführen.',
-              style: TextStyle(
-                fontSize: 14,
-              ),
+              style: TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 24),
 
@@ -428,14 +421,15 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                         children: [
                           Text('Besitzer: ${equipment.owner}'),
                           Text('NFC: ${equipment.nfcTag}'),
-                          if (equipment.barcode != null && equipment.barcode!.isNotEmpty)
+                          if (equipment.barcode != null &&
+                              equipment.barcode!.isNotEmpty)
                             Text('Barcode: ${equipment.barcode}'),
                         ],
                       ),
                       onTap: () {
                         setState(() {
                           _foundEquipment = equipment;
-                          _searchResults = []; // Liste leeren, um das ausgewählte Element anzuzeigen
+                          _searchResults = [];
                         });
                       },
                       isThreeLine: true,
@@ -505,7 +499,9 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                                 Text(
                                   'Größe: ${_foundEquipment!.size}',
                                   style: TextStyle(
-                                    color: Theme.of(context).colorScheme.secondary,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .secondary,
                                   ),
                                 ),
                               ],
@@ -515,14 +511,18 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                       ),
                       const Divider(height: 24),
                       // Weitere Details
-                      _buildInfoRow(context, 'Besitzer', _foundEquipment!.owner),
-                      _buildInfoRow(context, 'Feuerwehr', _foundEquipment!.fireStation),
+                      _buildInfoRow(
+                          context, 'Besitzer', _foundEquipment!.owner),
+                      _buildInfoRow(
+                          context, 'Feuerwehr', _foundEquipment!.fireStation),
                       _buildInfoRow(
                         context,
                         'Status',
                         _foundEquipment!.status,
-                        iconData: EquipmentStatus.getStatusIcon(_foundEquipment!.status),
-                        iconColor: EquipmentStatus.getStatusColor(_foundEquipment!.status),
+                        iconData: EquipmentStatus.getStatusIcon(
+                            _foundEquipment!.status),
+                        iconColor: EquipmentStatus.getStatusColor(
+                            _foundEquipment!.status),
                       ),
                       _buildInfoRow(
                         context,
@@ -530,7 +530,8 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                         _foundEquipment!.nfcTag,
                         iconData: Icons.nfc,
                       ),
-                      if (_foundEquipment!.barcode != null && _foundEquipment!.barcode!.isNotEmpty)
+                      if (_foundEquipment!.barcode != null &&
+                          _foundEquipment!.barcode!.isNotEmpty)
                         _buildInfoRow(
                           context,
                           'Barcode',
@@ -538,23 +539,30 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                           iconData: Icons.qr_code,
                         ),
                       const SizedBox(height: 16),
-                      // Aktions-Buttons
+
+                      // FIX: Aktions-Buttons in Expanded wrappen,
+                      // damit sie bei schmalem Display nicht überlaufen.
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          OutlinedButton.icon(
-                            onPressed: _viewDetails,
-                            icon: const Icon(Icons.info_outline),
-                            label: const Text('Details'),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _viewDetails,
+                              icon: const Icon(Icons.info_outline),
+                              label: const Text('Details'),
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: _createInspection,
-                            icon: const Icon(Icons.check_circle_outline),
-                            label: const Text('Prüfung durchführen'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Theme.of(context).colorScheme.primary,
-                              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _createInspection,
+                              icon: const Icon(Icons.check_circle_outline),
+                              label: const Text('Prüfung durchführen'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    Theme.of(context).colorScheme.primary,
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onPrimary,
+                              ),
                             ),
                           ),
                         ],
@@ -570,7 +578,13 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, String label, String value, {IconData? iconData, Color? iconColor}) {
+  Widget _buildInfoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    IconData? iconData,
+    Color? iconColor,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Row(
@@ -580,10 +594,11 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
             width: 24,
             child: iconData != null
                 ? Icon(
-              iconData,
-              size: 18,
-              color: iconColor ?? Theme.of(context).colorScheme.secondary,
-            )
+                    iconData,
+                    size: 18,
+                    color: iconColor ??
+                        Theme.of(context).colorScheme.secondary,
+                  )
                 : const SizedBox.shrink(),
           ),
           SizedBox(
@@ -599,9 +614,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w500),
             ),
           ),
         ],

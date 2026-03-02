@@ -1,7 +1,6 @@
 // lib/screens/register_screen.dart
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
-import '../services/profile_completetion_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -34,14 +33,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _passwordController.text.trim(),
       );
 
-      // Explizit navigieren — nicht auf StreamBuilder warten.
-      // Das Firestore-Dokument und der Auth-Event treffen gleichzeitig
-      // ein und würden eine Race Condition im StreamBuilder verursachen.
+      // Firestore-Dokument ist jetzt geschrieben (set() wurde awaited).
+      // RegisterScreen liegt via pushNamed über dem MaterialApp.home.
+      // Wir müssen den Stack leeren damit der StreamBuilder sichtbar wird.
       if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const ProfileCompletionScreen()),
-          (route) => false,
-        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {
@@ -67,9 +63,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Registrieren'),
-      ),
+      appBar: AppBar(title: const Text('Registrieren')),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -92,8 +86,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
-
-                  // E-Mail
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -107,15 +99,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       if (value == null || value.isEmpty) {
                         return 'Bitte geben Sie Ihre E-Mail-Adresse ein';
                       }
-                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                          .hasMatch(value)) {
                         return 'Bitte geben Sie eine gültige E-Mail-Adresse ein';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
-
-                  // Passwort
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
@@ -135,8 +126,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-
-                  // Passwort bestätigen
                   TextFormField(
                     controller: _confirmPasswordController,
                     obscureText: true,
@@ -156,8 +145,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     },
                   ),
                   const SizedBox(height: 24),
-
-                  // Fehlermeldung
                   if (_errorMessage.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -173,16 +160,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               color: Colors.red.shade700, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(
-                              _errorMessage,
-                              style: TextStyle(color: Colors.red.shade700),
-                            ),
+                            child: Text(_errorMessage,
+                                style: TextStyle(color: Colors.red.shade700)),
                           ),
                         ],
                       ),
                     ),
-
-                  // Registrieren-Button
                   ElevatedButton(
                     onPressed: _isLoading ? null : _register,
                     style: ElevatedButton.styleFrom(
@@ -198,7 +181,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             style: TextStyle(fontSize: 16)),
                   ),
                   const SizedBox(height: 16),
-
                   TextButton(
                     onPressed: _isLoading ? null : () => Navigator.pop(context),
                     child: const Text('Bereits ein Konto? Anmelden'),

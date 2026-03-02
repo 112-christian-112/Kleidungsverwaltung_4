@@ -231,6 +231,9 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
       child: Column(
         children: [
           // Einsatztyp
+          // FIX: Kein Flexible/Expanded innerhalb von DropdownMenuItem –
+          //      das verursacht den "RenderBox was not laid out"-Fehler.
+          //      isExpanded: true am DropdownButtonFormField reicht aus.
           DropdownButtonFormField<String>(
             value: _missionType,
             decoration: const InputDecoration(
@@ -238,14 +241,21 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.category),
             ),
+            isExpanded: true,
             items: MissionKeywords.getAllTypes().map((type) {
               return DropdownMenuItem(
                 value: type,
-                child: Row(children: [
-                  Icon(MissionKeywords.getTypeIcon(type), size: 20),
-                  const SizedBox(width: 8),
-                  Text(MissionKeywords.getTypeName(type)),
-                ]),
+                child: Row(
+                  children: [
+                    Icon(MissionKeywords.getTypeIcon(type), size: 20),
+                    const SizedBox(width: 8),
+                    // FIX: Text direkt, kein Flexible-Wrapper
+                    Text(
+                      MissionKeywords.getTypeName(type),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               );
             }).toList(),
             onChanged: (v) {
@@ -269,8 +279,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
             items: MissionKeywords.getKeywordsForType(_missionType)
                 .map((kw) => DropdownMenuItem(
                       value: kw,
-                      child:
-                          Text(kw, overflow: TextOverflow.ellipsis),
+                      child: Text(kw, overflow: TextOverflow.ellipsis),
                     ))
                 .toList(),
             onChanged: (v) => setState(() => _selectedKeyword = v ?? ''),
@@ -325,6 +334,7 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Hauptfeuerwehr — nur Admins können sie ändern
+          // FIX: Kein Flexible-Wrapper im DropdownMenuItem
           DropdownButtonFormField<String>(
             value: _fireStation.isNotEmpty ? _fireStation : null,
             decoration: InputDecoration(
@@ -335,15 +345,19 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                   ? null
                   : 'Einsatz wird für deine Ortswehr erfasst',
             ),
+            isExpanded: true,
             items: _allStations
                 .map((s) => DropdownMenuItem(
                       value: s,
-                      child: Row(children: [
-                        Icon(FireStations.getIcon(s),
-                            size: 16, color: Colors.grey[600]),
-                        const SizedBox(width: 8),
-                        Text(s),
-                      ]),
+                      child: Row(
+                        children: [
+                          Icon(FireStations.getIcon(s),
+                              size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          // FIX: Text direkt, kein Flexible-Wrapper
+                          Text(s, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
                     ))
                 .toList(),
             onChanged: _canChangeStation
@@ -387,7 +401,14 @@ class _AddMissionScreenState extends State<AddMissionScreen> {
                   children: _selectedFireStations
                       .map((s) => Chip(
                             avatar: Icon(FireStations.getIcon(s), size: 16),
-                            label: Text(s),
+                            label: Text(
+                              s,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            labelPadding:
+                                const EdgeInsets.symmetric(horizontal: 2),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             backgroundColor: s == _fireStation
                                 ? Theme.of(context)
                                     .colorScheme
@@ -555,6 +576,8 @@ class _FireStationSelectorDialogState
             const Text('Wähle die am Einsatz beteiligten Ortswehren:',
                 style: TextStyle(fontSize: 13)),
             const SizedBox(height: 12),
+            // Flexible ist hier korrekt, da es innerhalb einer Column
+            // mit mainAxisSize.min sitzt – das ist kein DropdownMenuItem
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -564,17 +587,26 @@ class _FireStationSelectorDialogState
                     return CheckboxListTile(
                       dense: true,
                       value: _selected.contains(station),
-                      title: Row(children: [
-                        Icon(FireStations.getIcon(station),
-                            size: 16, color: Colors.grey[600]),
-                        const SizedBox(width: 8),
-                        Text(station),
-                      ]),
+                      title: Row(
+                        children: [
+                          Icon(FireStations.getIcon(station),
+                              size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 4),
+                          // Flexible ist hier erlaubt: Row innerhalb
+                          // von CheckboxListTile.title hat feste Breite
+                          Flexible(
+                            child: Text(
+                              station,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                       subtitle: isOwn
-                          ? const Text('Hauptfeuerwehr',
-                              style: TextStyle(
-                                  fontStyle: FontStyle.italic,
-                                  fontSize: 11))
+                          ? const Text(
+                              'Hauptfeuerwehr',
+                              style: TextStyle(fontStyle: FontStyle.italic),
+                            )
                           : null,
                       onChanged: isOwn
                           ? null

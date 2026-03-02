@@ -267,8 +267,10 @@ class _EditMissionScreenState extends State<EditMissionScreen> {
           const SizedBox(height: 16),
 
           // Einsatztyp
+          // FIX: isExpanded: true + kein Flexible/Expanded im DropdownMenuItem-Child
           DropdownButtonFormField<String>(
             value: _missionType,
+            isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Einsatztyp',
               border: OutlineInputBorder(),
@@ -277,11 +279,17 @@ class _EditMissionScreenState extends State<EditMissionScreen> {
             items: _missionTypes.entries
                 .map((e) => DropdownMenuItem(
                       value: e.key,
-                      child: Row(children: [
-                        Icon(e.value.icon, size: 20),
-                        const SizedBox(width: 8),
-                        Text(e.value.label),
-                      ]),
+                      child: Row(
+                        children: [
+                          Icon(e.value.icon, size: 20),
+                          const SizedBox(width: 8),
+                          // FIX: Text direkt, kein Flexible-Wrapper
+                          Text(
+                            e.value.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ))
                 .toList(),
             onChanged: (v) {
@@ -333,8 +341,10 @@ class _EditMissionScreenState extends State<EditMissionScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Hauptfeuerwehr (nur für Admins editierbar)
+          // FIX: isExpanded: true + kein Flexible/Expanded im DropdownMenuItem-Child
           DropdownButtonFormField<String>(
             value: _fireStation.isNotEmpty ? _fireStation : null,
+            isExpanded: true,
             decoration: InputDecoration(
               labelText: 'Hauptfeuerwehr',
               border: const OutlineInputBorder(),
@@ -346,12 +356,15 @@ class _EditMissionScreenState extends State<EditMissionScreen> {
             items: _allStations
                 .map((s) => DropdownMenuItem(
                       value: s,
-                      child: Row(children: [
-                        Icon(FireStations.getIcon(s),
-                            size: 16, color: Colors.grey[600]),
-                        const SizedBox(width: 8),
-                        Text(s),
-                      ]),
+                      child: Row(
+                        children: [
+                          Icon(FireStations.getIcon(s),
+                              size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          // FIX: Text direkt, kein Flexible-Wrapper
+                          Text(s, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
                     ))
                 .toList(),
             onChanged: _canEditStation
@@ -568,6 +581,8 @@ class _FireStationSelectorDialogState
                 'Wähle die am Einsatz beteiligten Ortswehren aus:',
                 style: TextStyle(fontSize: 13)),
             const SizedBox(height: 12),
+            // Flexible ist hier korrekt – innerhalb einer Column mit
+            // mainAxisSize.min, nicht in einem DropdownMenuItem
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -578,17 +593,25 @@ class _FireStationSelectorDialogState
                     return CheckboxListTile(
                       dense: true,
                       value: isSelected,
-                      title: Row(children: [
-                        Icon(FireStations.getIcon(station),
-                            size: 16, color: Colors.grey[600]),
-                        const SizedBox(width: 8),
-                        Text(station),
-                      ]),
+                      title: Row(
+                        children: [
+                          Icon(FireStations.getIcon(station),
+                              size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          // Flexible ist hier erlaubt: Row in
+                          // CheckboxListTile.title hat feste Breite
+                          Flexible(
+                            child: Text(
+                              station,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                       subtitle: isOwn
                           ? const Text('Hauptfeuerwehr',
                               style: TextStyle(
-                                  fontStyle: FontStyle.italic,
-                                  fontSize: 11))
+                                  fontStyle: FontStyle.italic, fontSize: 11))
                           : null,
                       // Eigene Station kann nicht abgewählt werden
                       onChanged: isOwn
