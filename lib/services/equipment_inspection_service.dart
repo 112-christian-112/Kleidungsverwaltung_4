@@ -4,58 +4,66 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/equipment_inspection_model.dart';
 import '../models/equipment_model.dart';
-import 'equipment_service.dart';
 import 'equipment_history_service.dart';
 import 'permission_service.dart';
 
 class EquipmentInspectionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final EquipmentService _equipmentService = EquipmentService();
   final EquipmentHistoryService _historyService = EquipmentHistoryService();
   final PermissionService _permissionService = PermissionService();
 
   // ── Schreib-Methoden ──────────────────────────────────────────────────────
 
-  /// Neue Prüfung speichern + Equipment-Status, Prüfdatum, Waschzyklen
-  /// und History aktualisieren.
+  /// Neue Prüfung speichern + Equipment-Status und Prüfdatum in einem
+  /// einzigen Batch-Write aktualisieren (Android-kompatibel).
   Future<DocumentReference> addInspection(
       EquipmentInspectionModel inspection) async {
-    if (_auth.currentUser == null) {
-      throw Exception('Kein Benutzer angemeldet');
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
+
+    // 1. Einmalige Berechtigungs- und Zustandsprüfung
+    final user = await _permissionService.getCurrentUser();
+    if (user == null ||
+        (!user.isAdmin && !user.permissions.inspectionPerform)) {
+      throw Exception('Keine Berechtigung zum Durchführen von Prüfungen');
     }
 
-    // 1. Aktuellen Equipment-Zustand lesen (für Waschzyklus- und History-Logik)
-    final equipmentDoc = await _firestore
-        .collection('equipment')
-        .doc(inspection.equipmentId)
-        .get();
+    // 2. Aktuellen Equipment-Zustand lesen (einmalig)
+    final equipmentRef =
+        _firestore.collection('equipment').doc(inspection.equipmentId);
+    final equipmentDoc = await equipmentRef.get();
     final currentStatus =
         (equipmentDoc.data()?['status'] as String?) ?? '';
     final currentWashCycles =
         (equipmentDoc.data()?['washCycles'] as int?) ?? 0;
+    final fromCleaning = currentStatus == EquipmentStatus.cleaning;
 
-    // 2. Prüfung speichern
-    final docRef = await _firestore
+    // 3. Prüfungs-Dokument anlegen (außerhalb Batch, da wir die Ref brauchen)
+    final inspectionRef = await _firestore
         .collection('equipment_inspections')
         .add(inspection.toMap());
 
-    // 3. Prüfdatum setzen
-    await _equipmentService.updateCheckDate(
-        inspection.equipmentId, inspection.nextInspectionDate);
-
-    // 4. Status setzen
+    // 4. Alle Equipment-Updates in einem einzigen Batch
     final newStatus = _statusFromResult(inspection.result);
-    await _equipmentService.updateStatus(inspection.equipmentId, newStatus);
+    final batch = _firestore.batch();
 
-    // 5. Waschzyklen hochzählen wenn Kleidungsstück aus Reinigung kam
-    final fromCleaning = currentStatus == EquipmentStatus.cleaning;
+    final equipmentUpdate = <String, dynamic>{
+      'status': newStatus,
+      'checkDate': Timestamp.fromDate(inspection.nextInspectionDate),
+      'updatedAt': Timestamp.now(),
+      'updatedBy': currentUser.uid,
+    };
+
+    // Waschzyklen nur hochzählen wenn aus Reinigung
     if (fromCleaning) {
-      await _equipmentService.updateWashCycles(
-          inspection.equipmentId, currentWashCycles + 1);
+      equipmentUpdate['washCycles'] = currentWashCycles + 1;
     }
 
-    // 6. History-Einträge schreiben (best-effort, Fehler nicht weiterwerfen)
+    batch.update(equipmentRef, equipmentUpdate);
+    await batch.commit();
+
+    // 5. History best-effort (Fehler nicht weiterwerfen)
     try {
       await _historyService.recordFieldUpdate(
         equipmentId: inspection.equipmentId,
@@ -75,43 +83,51 @@ class EquipmentInspectionService {
       print('History-Fehler (nicht kritisch): $e');
     }
 
-    return docRef;
+    return inspectionRef;
   }
 
-  /// Bestehende Prüfung aktualisieren + Equipment-Status, Prüfdatum
-  /// und History synchron halten.
+  /// Bestehende Prüfung aktualisieren + Equipment-Status und Prüfdatum
+  /// in einem einzigen Batch-Write synchron halten.
   Future<void> updateInspection(EquipmentInspectionModel inspection) async {
-    if (_auth.currentUser == null) {
-      throw Exception('Kein Benutzer angemeldet');
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
+
+    final user = await _permissionService.getCurrentUser();
+    if (user == null ||
+        (!user.isAdmin && !user.permissions.inspectionPerform)) {
+      throw Exception('Keine Berechtigung zum Bearbeiten von Prüfungen');
     }
 
-    // Alten Status für History lesen
-    final equipmentDoc = await _firestore
-        .collection('equipment')
-        .doc(inspection.equipmentId)
-        .get();
+    // Einmalig alten Status lesen
+    final equipmentRef =
+        _firestore.collection('equipment').doc(inspection.equipmentId);
+    final equipmentDoc = await equipmentRef.get();
     final oldStatus = (equipmentDoc.data()?['status'] as String?) ?? '';
 
-    // 1. Prüfungsdokument aktualisieren
-    await _firestore
-        .collection('equipment_inspections')
-        .doc(inspection.id)
-        .update(inspection.toMap());
-
-    // 2. Prüfdatum aktualisieren
-    await _equipmentService.updateCheckDate(
-        inspection.equipmentId, inspection.nextInspectionDate);
-
-    // 3. Status aktualisieren
+    // Batch: Prüfung + Equipment in einem Commit
     final newStatus = _statusFromResult(inspection.result);
-    await _equipmentService.updateStatus(inspection.equipmentId, newStatus);
+    final batch = _firestore.batch();
 
-    // 4. History-Einträge schreiben (best-effort)
+    batch.update(
+      _firestore.collection('equipment_inspections').doc(inspection.id),
+      inspection.toMap(),
+    );
+
+    batch.update(equipmentRef, {
+      'status': newStatus,
+      'checkDate': Timestamp.fromDate(inspection.nextInspectionDate),
+      'updatedAt': Timestamp.now(),
+      'updatedBy': currentUser.uid,
+    });
+
+    await batch.commit();
+
+    // History best-effort
     try {
       await _historyService.recordFieldUpdate(
         equipmentId: inspection.equipmentId,
         field: 'Prüfung',
-        oldValue: null,
+        oldValue: oldStatus,
         newValue: 'Prüfung bearbeitet — ${_resultText(inspection.result)}',
       );
     } catch (e) {
@@ -120,7 +136,6 @@ class EquipmentInspectionService {
   }
 
   /// Prüfung löschen.
-  /// Equipment-Status wird nicht zurückgesetzt — muss manuell geprüft werden.
   Future<void> deleteInspection(String inspectionId) async {
     await _firestore
         .collection('equipment_inspections')

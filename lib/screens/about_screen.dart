@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../changelog.dart';
 
 class AboutScreen extends StatefulWidget {
   const AboutScreen({Key? key}) : super(key: key);
@@ -89,58 +90,19 @@ class _AboutScreenState extends State<AboutScreen> {
                     'Diese App wurde für die Verwaltung von Einsatzkleidung der Feuerwehr entwickelt. Sie ermöglicht die Überwachung, Inspektion und Verfolgung von Feuerwehrausrüstung mit NFC-Tags.',
                     style: TextStyle(height: 1.5),
                   ),
-                  SizedBox(height: 16),
-                  Text(
-                    'Hauptfunktionen:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8),
-                  BulletPoint(
-                    text: 'Verwaltung und Überwachung von Einsatzkleidung',
-                  ),
-                  BulletPoint(
-                    text: 'NFC-basierte Identifikation von Ausrüstungsgegenständen',
-                  ),
-                  BulletPoint(
-                    text: 'Prüfungsmanagement und Benachrichtigungen',
-                  ),
-                  BulletPoint(
-                    text: 'Einsatzdokumentation und -zuweisung',
-                  ),
-                  BulletPoint(
-                    text: 'Automatische Nachverfolgung von Reinigungszyklen',
-                  ),
-                  BulletPoint(
-                    text: 'Analytische Dashboards für Administratoren',
-                  ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
 
-            // Entwicklerinformationen
-            _buildSectionTitle(context, 'Entwicklung'),
+            // Entwickler
+            _buildSectionTitle(context, 'Entwickler'),
             const SizedBox(height: 8),
             _buildCard(
               context,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Diese App wurde entwickelt für:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Feuerwehr Gemeinde Westoverledingen',
-                    style: TextStyle(height: 1.5),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Entwickelt von:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
                   const Text(
                     'Christian Greve',
                     style: TextStyle(height: 1.5),
@@ -174,174 +136,235 @@ class _AboutScreenState extends State<AboutScreen> {
             const SizedBox(height: 8),
             _buildCard(
               context,
-              child: Column(
+              child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Diese App wurde mit folgenden Technologien entwickelt:',
                     style: TextStyle(height: 1.5),
                   ),
-                  const SizedBox(height: 8),
-                  const BulletPoint(text: 'Flutter Framework'),
-                  const BulletPoint(text: 'Firebase (Authentifizierung, Firestore, Cloud Functions)'),
-                  const BulletPoint(text: 'NFC-Integration für Ausrüstungsidentifikation'),
-                  const BulletPoint(text: 'Barcode-Scanning für alternative Identifikation'),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Text(
-                        'Dokumentation: ',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      GestureDetector(
-                        onTap: () => _launchUrl('https://example.com/docs'),
-                        child: Text(
-                          'Benutzerhandbuch',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  SizedBox(height: 8),
+                  BulletPoint(text: 'Flutter Framework'),
+                  BulletPoint(text: 'Firebase (Authentifizierung, Firestore, Cloud Functions)'),
+                  BulletPoint(text: 'NFC-Integration für Ausrüstungsidentifikation'),
+                  BulletPoint(text: 'Barcode-Scanning für alternative Identifikation'),
                 ],
               ),
             ),
             const SizedBox(height: 24),
 
-            // Datenschutz und Impressum
-            _buildSectionTitle(context, 'Rechtliches'),
+            // ── Changelog ─────────────────────────────────────────────────────
+            _buildSectionTitle(context, 'Changelog'),
             const SizedBox(height: 8),
-            _buildCard(
-              context,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  GestureDetector(
-                    onTap: () => _launchUrl('https://example.com/privacy'),
-                    child: Text(
-                      'Datenschutzerklärung',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: () => _launchUrl('https://example.com/imprint'),
-                    child: Text(
-                      'Impressum',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: () => _launchUrl('https://example.com/license'),
-                    child: Text(
-                      'Lizenzinformationen',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-            Center(
-              child: Text(
-                '© ${DateTime.now().year} Feuerwehr Gemeinde Westoverledingen',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-            const SizedBox(height: 16),
+            _buildChangelogSection(context),
+            const SizedBox(height: 32),
           ],
         ),
       ),
     );
   }
 
-  // Hilfsmethoden
+  // ── Changelog ──────────────────────────────────────────────────────────────
+
+  Widget _buildChangelogSection(BuildContext context) {
+    return Column(
+      children: changelog.asMap().entries.map((entry) {
+        final isLatest = entry.key == 0;
+        return _buildVersionCard(context, entry.value, isLatest: isLatest);
+      }).toList(),
+    );
+  }
+
+  Widget _buildVersionCard(BuildContext context, ChangelogEntry entry,
+      {bool isLatest = false}) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: isLatest ? 3 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isLatest
+            ? BorderSide(
+                color: Theme.of(context).colorScheme.primary, width: 1.5)
+            : BorderSide.none,
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: isLatest,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          childrenPadding:
+              const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          leading: CircleAvatar(
+            radius: 18,
+            backgroundColor: isLatest
+                ? Theme.of(context).colorScheme.primary
+                : Colors.grey.shade300,
+            child: Icon(
+              Icons.rocket_launch,
+              size: 16,
+              color: isLatest ? Colors.white : Colors.grey.shade600,
+            ),
+          ),
+          title: Row(
+            children: [
+              Text(
+                'v${entry.version}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: isLatest
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+              ),
+              if (isLatest) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'Aktuell',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(
+            entry.date,
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+          ),
+          children: entry.changes
+              .map((item) => _buildChangeItem(context, item))
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChangeItem(BuildContext context, ChangelogItem item) {
+    Color chipColor;
+    IconData chipIcon;
+    String chipLabel;
+
+    switch (item.type) {
+      case 'new':
+        chipColor = Colors.green;
+        chipIcon = Icons.add_circle_outline;
+        chipLabel = 'Neu';
+        break;
+      case 'fix':
+        chipColor = Colors.orange;
+        chipIcon = Icons.bug_report_outlined;
+        chipLabel = 'Fix';
+        break;
+      case 'improvement':
+        chipColor = Colors.blue;
+        chipIcon = Icons.trending_up;
+        chipLabel = 'Verbesserung';
+        break;
+      case 'breaking':
+        chipColor = Colors.red;
+        chipIcon = Icons.warning_amber_outlined;
+        chipLabel = 'Wichtig';
+        break;
+      default:
+        chipColor = Colors.grey;
+        chipIcon = Icons.info_outline;
+        chipLabel = 'Info';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: chipColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: chipColor.withOpacity(0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(chipIcon, size: 11, color: chipColor),
+                const SizedBox(width: 3),
+                Text(
+                  chipLabel,
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: chipColor,
+                      fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.text,
+              style: const TextStyle(fontSize: 13, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Hilfsmethoden ──────────────────────────────────────────────────────────
+
+  Future<void> _launchEmail(String email) async {
+    final uri = Uri(scheme: 'mailto', path: email);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
   Widget _buildSectionTitle(BuildContext context, String title) {
     return Text(
       title,
       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.bold,
-        color: Theme.of(context).colorScheme.primary,
-      ),
+            fontWeight: FontWeight.bold,
+          ),
     );
   }
 
   Widget _buildCard(BuildContext context, {required Widget child}) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: child,
       ),
     );
   }
-
-  Future<void> _launchUrl(String urlString) async {
-    final Uri url = Uri.parse(urlString);
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Konnte die URL nicht öffnen'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _launchEmail(String email) async {
-    final Uri emailUri = Uri(
-      scheme: 'mailto',
-      path: email,
-      queryParameters: {
-        'subject': 'Anfrage: Einsatzkleidung App',
-      },
-    );
-
-    if (!await launchUrl(emailUri)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Konnte die E-Mail-App nicht öffnen'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
 }
+
+// ── BulletPoint Helper ────────────────────────────────────────────────────────
 
 class BulletPoint extends StatelessWidget {
   final String text;
-
   const BulletPoint({Key? key, required this.text}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4.0),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(child: Text(text)),
+          const Text('• ', style: TextStyle(fontSize: 14)),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
         ],
       ),
     );
