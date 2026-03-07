@@ -1,0 +1,13 @@
+{
+  "latestVersion": "1.7.0",
+  "versions": [
+    {
+      "version": "1.7.0",
+      "apkUrl": "https://github.com/112-christian-112/Kleidungsverwaltung_4/releases/download/v1.7.0/app-release.apk"
+    },
+    {
+      "version": "1.6.0",
+      "apkUrl": "https://github.com/112-christian-112/Kleidungsverwaltung_4/releases/download/v1.6.0/app-release.apk"
+    }
+  ]
+}
