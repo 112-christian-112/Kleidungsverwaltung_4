@@ -1,6 +1,6 @@
 {
   "latestVersion": "1.6.0",
-  "apkUrl": "https://christiangreve.4lima.de/android/app-release.apk",
+  "apkUrl": "https://github.com/112-christian-112/Kleidungsverwaltung_4/releases/download/v1.6.0/app-release.apk",
   "changelog": [
     "Exportfunktion mit Einsätzen und Prüfungshistorie",
     "Datumsbereich-Filter für Exporte",
