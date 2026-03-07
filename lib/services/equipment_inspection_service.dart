@@ -208,4 +208,44 @@ class EquipmentInspectionService {
         return 'Durchgefallen';
     }
   }
+
+  /// Alle Prüfungen einmalig abrufen (kein Stream → kein "already listened")
+  Future<List<EquipmentInspectionModel>> getAllInspectionsFuture() async {
+    try {
+      final snapshot = await _firestore
+          .collection('equipment_inspections')
+          .orderBy('inspectionDate', descending: true)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => EquipmentInspectionModel.fromMap(
+          doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+    } catch (e) {
+      print('Fehler beim Abrufen aller Prüfungen: $e');
+      return [];
+    }
+  }
+
+  /// Alle Prüfungen für eine bestimmte Ausrüstung einmalig abrufen
+  Future<List<EquipmentInspectionModel>> getInspectionsForEquipmentFuture(
+      String equipmentId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('equipment_inspections')
+          .where('equipmentId', isEqualTo: equipmentId)
+          .orderBy('inspectionDate', descending: true)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => EquipmentInspectionModel.fromMap(
+          doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+    } catch (e) {
+      print('Fehler beim Abrufen der Prüfungen für $equipmentId: $e');
+      return [];
+    }
+  }
+
 }
+

@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.example.kleidungsverwaltung_2"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 23
+        minSdkVersion 36
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.kleidungsverwaltung_2"
         // You can update the following values to match your application needs.

@@ -31,6 +31,18 @@ class ChangelogItem {
 const List<ChangelogEntry> changelog = [
 
   ChangelogEntry(
+    version: '1.7.0',
+    date: '07.03.2026',
+    changes: [
+      ChangelogItem(type: 'new',         text: 'Exportfunktion mit Einsätzen und Prüfungshistorie'),
+      ChangelogItem(type: 'new',         text: 'Datumsbereich-Filter für Exporte'),
+      ChangelogItem(type: 'new',         text: 'Statistik-Zusammenfassung im PDF'),
+      ChangelogItem(type: 'improvement', text: 'Bugfixes und Performance-Verbesserungen'),
+      ChangelogItem(type: 'new',         text: 'Update_Handler eingebaut'),
+    ],
+  ),
+
+  ChangelogEntry(
     version: '1.3.0',
     date: '02.03.2026',
     changes: [
@@ -47,7 +59,7 @@ const List<ChangelogEntry> changelog = [
 
   ChangelogEntry(
     version: '1.2.0',
-    date: '10.06.2026',
+    date: '10.06.2025',
     changes: [
       ChangelogItem(type: 'new',         text: 'NFC-Scan zum Identifizieren der Einsatzkleidung'),
       ChangelogItem(type: 'new',         text: 'Einsatzdokumentation mit Kleidungszuordnung'),
@@ -58,7 +70,7 @@ const List<ChangelogEntry> changelog = [
 
   ChangelogEntry(
     version: '1.1.0',
-    date: '15.05.2026',
+    date: '15.05.2025',
     changes: [
       ChangelogItem(type: 'new',         text: 'Benutzerverwaltung mit Rollensystem'),
       ChangelogItem(type: 'new',         text: 'Feuerwehr-übergreifende Sichtbarkeitsrechte'),

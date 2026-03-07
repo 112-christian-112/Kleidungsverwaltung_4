@@ -1,6 +1,8 @@
 // screens/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../Lists/fire_stations.dart';
 import '../models/equipment_model.dart';
 import '../models/mission_model.dart';
@@ -9,6 +11,7 @@ import '../services/auth_service.dart';
 import '../services/equipment_service.dart';
 import '../services/mission_service.dart';
 import '../services/permission_service.dart';
+import '../services/update_service.dart';
 import '../widgets/navigation_drawer.dart';
 import '../widgets/recent_activities_widget.dart';
 import 'admin/equipment/equipment_scan_screen.dart';
@@ -31,6 +34,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final EquipmentService _equipmentService = EquipmentService();
   final MissionService _missionService = MissionService();
   final PermissionService _permissionService = PermissionService();
+
+  UpdateInfo? _updateInfo;
 
   // Einmal laden — Quelle der Wahrheit
   UserModel? _currentUser;
@@ -58,6 +63,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadAll();
   }
 
+
+
   Future<void> _loadAll() async {
     setState(() => _isLoading = true);
     try {
@@ -71,8 +78,33 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
-  }
 
+    // ── DEBUG: Update-Check mit Logs ─────────────────────────────────────────
+    print('[UPDATE] Starte Update-Check...');
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      print('[UPDATE] App-Version: ${packageInfo.version}');
+      print('[UPDATE] Prüfe URL: $kVersionUrl');
+
+      final response = await http
+          .get(Uri.parse(kVersionUrl))
+          .timeout(const Duration(seconds: 8));
+
+      print('[UPDATE] HTTP Status: ${response.statusCode}');
+      print('[UPDATE] Response: ${response.body}');
+
+      final updateInfo = await UpdateService.checkForUpdate();
+      print('[UPDATE] UpdateInfo: ${updateInfo?.latestVersion ??
+          'null (kein Update)'}');
+
+      if (mounted && updateInfo != null) {
+        setState(() => _updateInfo = updateInfo);
+        print('[UPDATE] State gesetzt, Icon sollte erscheinen');
+      }
+    } catch (e) {
+      print('[UPDATE] Fehler: $e');
+    }
+  }
   Future<void> _loadStatistics(UserModel? user) async {
     if (user == null) return;
     try {
@@ -119,17 +151,39 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Einsatzkleidung'),
         actions: [
-// home_screen.dart AppBar-Button
+          // Update-Badge – nur anzeigen wenn Update verfügbar
+          if (_updateInfo != null)
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.system_update),
+                  tooltip: 'Update verfügbar: v${_updateInfo!.latestVersion}',
+                  onPressed: () =>
+                      UpdateService.showUpdateDialog(context, _updateInfo!),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _authService.signOut();
-              // StreamBuilder übernimmt automatisch
-            },
+            onPressed: () async { await _authService.signOut(); },
             tooltip: 'Abmelden',
           ),
         ],
       ),
+
       drawer: const AppNavigationDrawer(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

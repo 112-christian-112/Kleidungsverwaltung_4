@@ -1,0 +1,2 @@
+C:/Users/chris/AndroidStudioProjects/Release1.0_Daten/Kleidungsverwaltung_2/android/app/.cxx/Debug/3u50231h/x86/CMakeFiles/edit_cache.dir
+C:/Users/chris/AndroidStudioProjects/Release1.0_Daten/Kleidungsverwaltung_2/android/app/.cxx/Debug/3u50231h/x86/CMakeFiles/rebuild_cache.dir

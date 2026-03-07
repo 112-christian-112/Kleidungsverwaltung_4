@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/admin/debug_permissions_screen.dart';
 import '../screens/admin/equipment/upcoming_inspections_screen.dart';
 import '../screens/dashboard/dashboard_screen.dart';
+import '../screens/export_screen.dart';
 import '../services/auth_service.dart';
 import '../services/permission_service.dart'; // Verwende den Permission Service
 import '../screens/admin/equipment/equipment_list_screen.dart';
@@ -194,6 +195,20 @@ class _AppNavigationDrawerState extends State<AppNavigationDrawer> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/missions');
+              },
+            ),
+
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: const Text('Export'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ExportScreen(),
+                  ),
+                );
               },
             ),
 
