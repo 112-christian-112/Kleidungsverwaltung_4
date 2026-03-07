@@ -6,5 +6,27 @@
     "Datumsbereich-Filter für Exporte",
     "Statistik-Zusammenfassung im PDF",
     "Bugfixes und Performance-Verbesserungen"
+  ],
+  "versions": [
+    {
+      "version": "1.7.0",
+      "apkUrl": "https://github.com/112-christian-112/Kleidungsverwaltung_4/releases/download/v1.7.0/app-release.apk",
+      "date": "07.03.2026",
+      "changelog": [
+        "Exportfunktion mit Einsätzen und Prüfungshistorie",
+        "Datumsbereich-Filter für Exporte",
+        "Statistik-Zusammenfassung im PDF",
+        "Bugfixes und Performance-Verbesserungen"
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "apkUrl": "https://github.com/112-christian-112/Kleidungsverwaltung_4/releases/download/v1.6.0/app-release.apk",
+      "date": "02.03.2026",
+      "changelog": [
+        "VIKING Prüfcheckliste",
+        "Rechteverwaltung umgebaut"
+      ]
+    }
   ]
 }
