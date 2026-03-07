@@ -1,0 +1,10 @@
+{
+  "latestVersion": "1.6.0",
+  "apkUrl": "https://christiangreve.4lima.de/android/app-release.apk",
+  "changelog": [
+    "Exportfunktion mit Einsätzen und Prüfungshistorie",
+    "Datumsbereich-Filter für Exporte",
+    "Statistik-Zusammenfassung im PDF",
+    "Bugfixes und Performance-Verbesserungen"
+  ]
+}
