@@ -8,82 +8,38 @@ import '../../../models/equipment_model.dart';
 import '../../../models/equipment_inspection_model.dart';
 import '../../../services/equipment_inspection_service.dart';
 import '../../../services/permission_service.dart';
+import '../../../lists/inspection_checklist_data.dart';
 
-// ─── Datenmodell für die Viking-Checkliste ────────────────────────────────────
+// ─── Internes Laufzeit-Modell (nicht editieren — Definitionen in inspection_checklist_data.dart)
 
 class _CheckItem {
   final String id;
   final String label;
-  /// true = bestanden, false = nicht bestanden, null = noch nicht bewertet
+  final bool isCritical;
+  final CheckType checkType;
   bool? passed;
-  /// Kommentar bei NIO (optional)
   String comment;
 
-  _CheckItem({required this.id, required this.label, this.passed, this.comment = ''});
+  _CheckItem.fromDef(CheckItemDef def)
+      : id = def.id,
+        label = def.label,
+        isCritical = def.isCritical,
+        checkType = def.checkType,
+        passed = null,
+        comment = '';
 }
 
 class _CheckCategory {
   final String title;
   final List<_CheckItem> items;
-
-  _CheckCategory({required this.title, required this.items});
+  _CheckCategory.fromDef(CheckCategoryDef def)
+      : title = def.title,
+        items = def.items.map(_CheckItem.fromDef).toList();
 }
 
-// Alle Prüfpunkte gemäß VIKING Prüfliste Feuerwehr – Einsatzkleidung
-List<_CheckCategory> _buildChecklistTemplate() {
-  return [
-    _CheckCategory(title: 'Kennzeichnung', items: [
-      _CheckItem(id: 'kenn_1', label: 'Kennzeichnung (z.B. DIN EN 469 bzw. Prüfnummer, Pflegeanweisung) lesbar?'),
-      _CheckItem(id: 'kenn_2', label: 'Pflegeanleitung lesbar?'),
-      _CheckItem(id: 'kenn_3', label: 'Informationen des Herstellers vorhanden, vollständig, verfügbar?'),
-    ]),
-    _CheckCategory(title: 'Oberstoff', items: [
-      _CheckItem(id: 'ober_1', label: 'Sichtprüfung auf Löcher'),
-      _CheckItem(id: 'ober_2', label: 'Sichtprüfung auf Verschmutzungen, die die Sicherheit beeinflussen können?'),
-      _CheckItem(id: 'ober_3', label: 'Sichtprüfung auf erkennbare thermische Schädigungen / Kräuselungen'),
-      _CheckItem(id: 'ober_4', label: 'Bei Laminat (z.B. Ausführung Niedersachsen): Sichtprüfung auf Ablösung Oberstoff – Laminat'),
-    ]),
-    _CheckCategory(title: 'Nahtverbindungen', items: [
-      _CheckItem(id: 'naht_1', label: 'Sichtprüfung auf Beschädigungen der Nahtverbindungen'),
-      _CheckItem(id: 'naht_2', label: 'Sichtprüfung der Abklebungen vollständig'),
-    ]),
-    _CheckCategory(title: 'Isolationsfutter', items: [
-      _CheckItem(id: 'iso_1', label: 'Sichtprüfung auf Beschädigung'),
-      _CheckItem(id: 'iso_2', label: 'Funktionsprüfung Reißverschluss (Beschädigungen, Leichtläufigkeit)'),
-    ]),
-    _CheckCategory(title: 'Innenfutter', items: [
-      _CheckItem(id: 'inn_1', label: 'Sichtprüfung auf Löcher'),
-      _CheckItem(id: 'inn_2', label: 'Sichtprüfung auf Verschmutzungen, die die Sicherheit beeinflussen können?'),
-      _CheckItem(id: 'inn_3', label: 'Sichtprüfung auf erkennbare thermische Schädigungen / Kräuselungen'),
-      _CheckItem(id: 'inn_4', label: 'Sichtprüfung auf Beschädigungen der Nahtverbindungen'),
-    ]),
-    _CheckCategory(title: 'Reißverschluss', items: [
-      _CheckItem(id: 'reiss_1', label: 'Sichtprüfung auf vollständige Schließung'),
-      _CheckItem(id: 'reiss_2', label: 'Sichtprüfung auf Beschädigung'),
-      _CheckItem(id: 'reiss_3', label: 'Funktionsprüfung Reißverschluss (Beschädigungen, Leichtläufigkeit)'),
-    ]),
-    _CheckCategory(title: 'Taschen / Überlappungen', items: [
-      _CheckItem(id: 'tasch_1', label: 'Sichtprüfung auf Überdeckung der Taschenpatten'),
-      _CheckItem(id: 'tasch_2', label: 'Sichtprüfung Knöpfe oder Klett vollständig & sauber'),
-      _CheckItem(id: 'tasch_3', label: 'Funktionsprüfung Schließung mit Klettstreifen'),
-    ]),
-    _CheckCategory(title: 'Aufhänger', items: [
-      _CheckItem(id: 'aufh_1', label: 'Sichtprüfung auf Vorhandensein und Beschädigung'),
-    ]),
-    _CheckCategory(title: 'Karabiner', items: [
-      _CheckItem(id: 'kara_1', label: 'Sichtprüfung auf Vorhandensein und Beschädigung'),
-    ]),
-    _CheckCategory(title: 'Klettverschlüsse', items: [
-      _CheckItem(id: 'klett_1', label: 'Sichtprüfung auf Beschädigung und Verschmutzung'),
-      _CheckItem(id: 'klett_2', label: 'Funktionsprüfung der sachgerechten Schließung'),
-    ]),
-    _CheckCategory(title: 'Reflexstreifen', items: [
-      _CheckItem(id: 'reflex_1', label: 'Sichtprüfung der Nahtverbindungen (Festigkeit, Ablösen)'),
-      _CheckItem(id: 'reflex_2', label: 'Sichtprüfung auf Beschädigung und Verschmutzung'),
-      _CheckItem(id: 'reflex_3', label: 'Funktionsprüfung der Reflexstreifen (ggf. mittels Lampe)'),
-    ]),
-  ];
-}
+/// Baut die editierbare Laufzeit-Checkliste aus den unveränderlichen Definitionen.
+List<_CheckCategory> _buildChecklistTemplate() =>
+    buildChecklist().map(_CheckCategory.fromDef).toList();
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
@@ -109,28 +65,18 @@ class _EquipmentInspectionFormScreenState
   final EquipmentInspectionService _inspectionService =
       EquipmentInspectionService();
 
-  // Datum & Prüfer
   DateTime _inspectionDate = DateTime.now();
   final TextEditingController _inspectionDateController =
       TextEditingController();
   final TextEditingController _inspectorController = TextEditingController();
-
-  DateTime _nextInspectionDate =
-      DateTime.now().add(const Duration(days: 365));
+  DateTime _nextInspectionDate = DateTime.now().add(const Duration(days: 365));
   final TextEditingController _nextInspectionDateController =
       TextEditingController();
-
   final TextEditingController _commentsController = TextEditingController();
 
-  // Checkliste
   late List<_CheckCategory> _checklist;
-
-  // Ergebnis (wird automatisch berechnet)
   InspectionResult _result = InspectionResult.passed;
-
-  // Letzte Prüfung (zur Anzeige im Header)
   EquipmentInspectionModel? _lastInspection;
-
   bool _isLoading = false;
   bool _isEditing = false;
 
@@ -163,9 +109,17 @@ class _EquipmentInspectionFormScreenState
       await _loadLastInspection();
       if (_isEditing) _loadExistingInspection();
     } catch (e) {
-      _showErrorSnackBar('Fehler beim Laden der Daten: $e');
+      _showError('Fehler beim Laden: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    final user = await _permissionService.getCurrentUser();
+    if (user != null && mounted && !_isEditing) {
+      _inspectorController.text =
+          user.name.isNotEmpty ? user.name : user.email;
     }
   }
 
@@ -177,62 +131,44 @@ class _EquipmentInspectionFormScreenState
           .orderBy('inspectionDate', descending: true)
           .limit(_isEditing ? 2 : 1)
           .get();
-
-      if (snapshot.docs.isEmpty) return;
-
-      // Beim Bearbeiten: die aktuelle Prüfung überspringen, die vorherige zeigen
-      final targetIndex = _isEditing && snapshot.docs.length > 1 ? 1 : 0;
-      final doc = snapshot.docs[targetIndex];
-      // Beim Bearbeiten nicht die eigene Prüfung als "letzte" zeigen
-      if (_isEditing && doc.id == widget.existingInspection!.id) return;
-
-      setState(() {
-        _lastInspection = EquipmentInspectionModel.fromMap(doc.data(), doc.id);
-      });
-    } catch (e) {
-      // Nicht kritisch — Header funktioniert ohne letzte Prüfung
-      print('Letzte Prüfung konnte nicht geladen werden: $e');
-    }
+      if (snapshot.docs.isNotEmpty && mounted) {
+        final doc = _isEditing && snapshot.docs.length > 1
+            ? snapshot.docs[1]
+            : snapshot.docs[0];
+        setState(() => _lastInspection =
+            EquipmentInspectionModel.fromMap(doc.data(), doc.id));
+      }
+    } catch (_) {}
   }
 
-  Future<void> _loadUserData() async {
-    final user = await _permissionService.getCurrentUser();
-    if (user != null && !_isEditing) {
-      _inspectorController.text =
-          user.name.isNotEmpty ? user.name : user.email;
-    }
-  }
-
-  /// Beim Bearbeiten: vorhandene Issues als "nicht bestanden" markieren.
   void _loadExistingInspection() {
-    final inspection = widget.existingInspection!;
-    _inspectionDate = inspection.inspectionDate;
-    _inspectorController.text = inspection.inspector;
-    _result = inspection.result;
-    _commentsController.text = inspection.comments;
-    _nextInspectionDate = inspection.nextInspectionDate;
+    final e = widget.existingInspection!;
+    _inspectionDate = e.inspectionDate;
     _inspectionDateController.text =
-        DateFormat('dd.MM.yyyy').format(_inspectionDate);
+        DateFormat('dd.MM.yyyy').format(e.inspectionDate);
+    _inspectorController.text = e.inspector;
+    _nextInspectionDate = e.nextInspectionDate;
     _nextInspectionDateController.text =
-        DateFormat('dd.MM.yyyy').format(_nextInspectionDate);
+        DateFormat('dd.MM.yyyy').format(e.nextInspectionDate);
+    _commentsController.text = e.comments;
+    _result = e.result;
 
-    // Issues werden als "Kategorie: Label" gespeichert — darüber matchen
-    final failedLabels = inspection.issues ?? [];
-    for (final cat in _checklist) {
-      for (final item in cat.items) {
-        final issueKey = '${cat.title}: ${item.label}';
-        final match = failedLabels.firstWhere(
-          (issue) => issue.startsWith(issueKey) || issue == issueKey,
-          orElse: () => '',
-        );
-        if (match.isNotEmpty) {
-          item.passed = false;
-          // Kommentar extrahieren falls vorhanden (Format: "Kat: Label | Kommentar")
-          final parts = match.split(' | ');
-          item.comment = parts.length > 1 ? parts.sublist(1).join(' | ') : '';
-        } else {
-          item.passed = true;
-          item.comment = '';
+    if (e.issues != null) {
+      final failedLabels = e.issues!;
+      for (final cat in _checklist) {
+        for (final item in cat.items) {
+          final key = '${cat.title}: ${item.label}';
+          final match = failedLabels.firstWhere(
+            (i) => i.startsWith(key) || i == key,
+            orElse: () => '',
+          );
+          if (match.isNotEmpty) {
+            item.passed = false;
+            final parts = match.split(' | ');
+            item.comment = parts.length > 1 ? parts.sublist(1).join(' | ') : '';
+          } else {
+            item.passed = true;
+          }
         }
       }
     }
@@ -254,15 +190,12 @@ class _EquipmentInspectionFormScreenState
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
       locale: const Locale('de', 'DE'),
-      helpText: 'Prüfdatum auswählen',
     );
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _inspectionDate = picked;
-        _inspectionDateController.text =
-            DateFormat('dd.MM.yyyy').format(picked);
-        _nextInspectionDate = DateTime(
-            picked.year + 1, picked.month, picked.day);
+        _inspectionDateController.text = DateFormat('dd.MM.yyyy').format(picked);
+        _nextInspectionDate = DateTime(picked.year + 1, picked.month, picked.day);
         _nextInspectionDateController.text =
             DateFormat('dd.MM.yyyy').format(_nextInspectionDate);
       });
@@ -276,9 +209,8 @@ class _EquipmentInspectionFormScreenState
       firstDate: DateTime.now(),
       lastDate: DateTime(2100),
       locale: const Locale('de', 'DE'),
-      helpText: 'Nächstes Prüfdatum auswählen',
     );
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _nextInspectionDate = picked;
         _nextInspectionDateController.text =
@@ -295,7 +227,6 @@ class _EquipmentInspectionFormScreenState
         for (final item in cat.items) {
           if (item.id == itemId) {
             item.passed = passed;
-            // Kommentar zurücksetzen wenn wieder auf IO gesetzt
             if (passed) item.comment = '';
           }
         }
@@ -324,19 +255,30 @@ class _EquipmentInspectionFormScreenState
     return ids;
   }
 
-  int get _totalItems =>
-      _checklist.fold(0, (sum, cat) => sum + cat.items.length);
+  /// Alle fehlgeschlagenen k.o.-Kriterien
+  List<_CheckItem> get _failedCriticalItems {
+    final items = <_CheckItem>[];
+    for (final cat in _checklist) {
+      for (final item in cat.items) {
+        if (item.passed == false && item.isCritical) items.add(item);
+      }
+    }
+    return items;
+  }
 
+  int get _totalItems => _checklist.fold(0, (s, c) => s + c.items.length);
   int get _answeredItems => _checklist.fold(
-      0,
-      (sum, cat) =>
-          sum + cat.items.where((i) => i.passed != null).length);
-
+      0, (s, c) => s + c.items.where((i) => i.passed != null).length);
   bool get _allAnswered => _answeredItems == _totalItems;
 
   void _recalculateResult() {
     final failed = _failedItemIds.length;
-    if (failed == 0) {
+    final criticalFailed = _failedCriticalItems.length;
+
+    // Ein k.o.-Kriterium reicht für "Nicht bestanden"
+    if (criticalFailed > 0) {
+      _result = InspectionResult.failed;
+    } else if (failed == 0) {
       _result = InspectionResult.passed;
     } else if (failed <= 2) {
       _result = InspectionResult.conditionalPass;
@@ -348,29 +290,25 @@ class _EquipmentInspectionFormScreenState
   // ── Speichern ──────────────────────────────────────────────────────────────
 
   Future<void> _saveInspection() async {
-    if (!_formKey.currentState!.validate()) {
-      _showErrorSnackBar('Bitte füllen Sie alle Pflichtfelder aus');
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
     if (!_allAnswered) {
-      _showErrorSnackBar(
-          'Bitte bewerten Sie alle Prüfpunkte (noch ${_totalItems - _answeredItems} offen)');
+      _showError(
+          'Noch ${_totalItems - _answeredItems} Punkte offen – bitte alle bewerten');
       return;
     }
-
     setState(() => _isLoading = true);
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
-
       final userModel = await _permissionService.getCurrentUser();
 
-      // Nicht-bestandene Items als Issues speichern (mit lesbarem Label)
       final issueLabels = <String>[];
       for (final cat in _checklist) {
         for (final item in cat.items) {
           if (item.passed == false) {
-            issueLabels.add('${cat.title}: ${item.label}');
+            final label = '${cat.title}: ${item.label}';
+            issueLabels.add(
+                item.comment.isNotEmpty ? '$label | ${item.comment}' : label);
           }
         }
       }
@@ -399,26 +337,23 @@ class _EquipmentInspectionFormScreenState
       }
 
       if (mounted) {
-        _showSuccessSnackBar(_isEditing
-            ? 'Prüfung erfolgreich aktualisiert'
-            : 'Prüfung erfolgreich gespeichert');
+        _showSuccess(
+            _isEditing ? 'Prüfung aktualisiert' : 'Prüfung gespeichert');
         Navigator.pop(context, true);
       }
     } catch (e) {
-      if (mounted) _showErrorSnackBar('Fehler beim Speichern: $e');
+      if (mounted) _showError('Fehler: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // ── Löschen ────────────────────────────────────────────────────────────────
 
   void _showDeleteDialog() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Prüfung löschen'),
-        content: const Text('Möchten Sie diese Prüfung wirklich löschen?'),
+        content: const Text('Prüfung wirklich löschen?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -438,349 +373,200 @@ class _EquipmentInspectionFormScreenState
     );
   }
 
-  // ── Snackbars ──────────────────────────────────────────────────────────────
-
-  void _showErrorSnackBar(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(
+  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
           content: Text(msg),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating));
 
-  void _showSuccessSnackBar(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(
+  void _showSuccess(String msg) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
           content: Text(msg),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating));
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-            _isEditing ? 'Prüfung bearbeiten' : 'Neue Prüfung durchführen'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
+        title: Text(_isEditing ? 'Prüfung bearbeiten' : 'Neue Prüfung'),
         actions: [
           if (_isEditing)
             IconButton(
-                icon: const Icon(Icons.delete), onPressed: _showDeleteDialog),
+                icon: const Icon(Icons.delete_outline),
+                onPressed: _showDeleteDialog,
+                tooltip: 'Prüfung löschen'),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _buildHeaderCard(),
-                  const SizedBox(height: 16),
-                  _buildProgressBanner(),
-                  const SizedBox(height: 16),
-                  ..._checklist.map(_buildCategoryCard),
-                  const SizedBox(height: 16),
-                  _buildResultSummaryCard(),
-                  const SizedBox(height: 16),
-                  _buildCommentsCard(),
-                  const SizedBox(height: 16),
-                  _buildNextInspectionCard(),
-                  const SizedBox(height: 24),
-                  _buildSaveButton(),
-                  const SizedBox(height: 32),
+              child: CustomScrollView(
+                slivers: [
+                  // ── Sticky Fortschrittsleiste ────────────────────────
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _ProgressBarDelegate(
+                      answered: _answeredItems,
+                      total: _totalItems,
+                      failed: _failedItemIds.length,
+                      allAnswered: _allAnswered,
+                      primaryColor: cs.primary,
+                    ),
+                  ),
+
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        // ── Equipment & Meta ──────────────────────────
+                        _buildMetaCard(cs),
+                        const SizedBox(height: 16),
+
+                        // ── Checkliste ────────────────────────────────
+                        ..._checklist.map((cat) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _buildCategoryCard(cat, cs),
+                            )),
+
+                        // ── Ergebnis ──────────────────────────────────
+                        _buildResultCard(cs),
+                        const SizedBox(height: 12),
+
+                        // ── Abschluss (Kommentar + Datum) ─────────────
+                        _buildFinishCard(cs),
+                        const SizedBox(height: 20),
+
+                        // ── Speichern ─────────────────────────────────
+                        _buildSaveButton(cs),
+                        const SizedBox(height: 24),
+                      ]),
+                    ),
+                  ),
                 ],
               ),
             ),
     );
   }
 
-  // ── Kopfbereich: Metadaten ─────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // META-CARD (Equipment + Prüfer + Datum)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildHeaderCard() {
+  Widget _buildMetaCard(ColorScheme cs) {
+    final isJacke = widget.equipment.type == 'Jacke';
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(Icons.fact_check,
-                  color: Theme.of(context).colorScheme.primary),
-              const SizedBox(width: 12),
-              const Text('Prüfinformationen',
-                  style:
-                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ]),
-            const SizedBox(height: 4),
-            Text(
-              'Prüfliste Feuerwehr – Einsatzkleidung (VIKING)',
-              style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade600,
-                  fontStyle: FontStyle.italic),
-            ),
-            const SizedBox(height: 20),
-
-            // Equipment-Info
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(children: [
-                Icon(Icons.inventory_2,
-                    color: Theme.of(context).colorScheme.primary, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                          '${widget.equipment.article} – ${widget.equipment.type}',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
-                      Text('Besitzer: ${widget.equipment.owner}',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                      if (widget.equipment.nfcTag.isNotEmpty)
-                        Text('NFC-Tag: ${widget.equipment.nfcTag}',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey.shade600)),
-                    ],
-                  ),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 16),
-
-            // Letzte Prüfung
-            if (_lastInspection != null) _buildLastInspectionBox(_lastInspection!),
-            if (_lastInspection != null) const SizedBox(height: 16),
-
-            // Prüfdatum
-            TextFormField(
-              controller: _inspectionDateController,
-              readOnly: true,
-              decoration: InputDecoration(
-                labelText: 'Geprüft am *',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.event),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-              ),
-              onTap: _selectInspectionDate,
-              validator: (v) =>
-                  v == null || v.isEmpty ? 'Bitte Datum auswählen' : null,
-            ),
-            const SizedBox(height: 12),
-
-            // Prüfer
-            TextFormField(
-              controller: _inspectorController,
-              decoration: InputDecoration(
-                labelText: 'Unterschrift / Prüfer *',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.person),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-              ),
-              validator: (v) =>
-                  v == null || v.isEmpty ? 'Bitte Prüfer angeben' : null,
-            ),
-          ],
-        ),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
       ),
-    );
-  }
-
-  // ── Letzte Prüfung Box ────────────────────────────────────────────────────────
-
-  Widget _buildLastInspectionBox(EquipmentInspectionModel last) {
-    Color resultColor;
-    IconData resultIcon;
-    String resultText;
-    switch (last.result) {
-      case InspectionResult.passed:
-        resultColor = Colors.green;
-        resultIcon = Icons.check_circle;
-        resultText = 'Bestanden';
-        break;
-      case InspectionResult.conditionalPass:
-        resultColor = Colors.orange;
-        resultIcon = Icons.warning_amber_rounded;
-        resultText = 'Bedingt bestanden';
-        break;
-      case InspectionResult.failed:
-        resultColor = Colors.red;
-        resultIcon = Icons.cancel;
-        resultText = 'Nicht bestanden';
-        break;
-    }
-
-    final hasIssues = last.issues != null && last.issues!.isNotEmpty;
-    final hasComments = last.comments.isNotEmpty;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: resultColor.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: resultColor.withOpacity(0.3)),
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          leading: Icon(resultIcon, color: resultColor, size: 20),
-          title: Text(
-            'Letzte Prüfung: ${DateFormat("dd.MM.yyyy").format(last.inspectionDate)}',
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: resultColor),
-          ),
-          subtitle: Text(
-            '$resultText  ·  ${last.inspector}',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-          ),
-          // Nur aufklappbar wenn es Mängel oder Kommentare gibt
-          initiallyExpanded: false,
-          children: [
-            if (!hasIssues && !hasComments)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('Keine Mängel festgestellt.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-              ),
-
-            // Mängel
-            if (hasIssues) ...[
-              const SizedBox(height: 6),
-              Row(children: [
-                Icon(Icons.warning_amber_rounded,
-                    size: 14, color: Colors.red.shade400),
-                const SizedBox(width: 6),
-                Text('Festgestellte Mängel:',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red.shade700)),
-              ]),
-              const SizedBox(height: 6),
-              ...last.issues!.map((issue) {
-                // Format: "Kategorie: Label" oder "Kategorie: Label | Kommentar"
-                final parts = issue.split(' | ');
-                final label = parts[0];
-                final comment = parts.length > 1 ? parts.sublist(1).join(' | ') : '';
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ', style: TextStyle(fontSize: 12)),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(label,
-                                style: const TextStyle(fontSize: 12)),
-                            if (comment.isNotEmpty)
-                              Text('↳ $comment',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade600,
-                                      fontStyle: FontStyle.italic)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ],
-
-            // Kommentar
-            if (hasComments) ...[
-              const SizedBox(height: 8),
-              Row(children: [
-                Icon(Icons.comment, size: 14, color: Colors.grey.shade500),
-                const SizedBox(width: 6),
-                Text('Bemerkung:',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey.shade700)),
-              ]),
-              const SizedBox(height: 4),
-              Text(last.comments,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Fortschrittsanzeige ────────────────────────────────────────────────────
-
-  Widget _buildProgressBanner() {
-    final progress =
-        _totalItems > 0 ? _answeredItems / _totalItems : 0.0;
-    final failCount = _failedItemIds.length;
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(
-                '$_answeredItems / $_totalItems Punkte bewertet',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              if (failCount > 0)
+            // Equipment-Info Zeile
+            Row(
+              children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
-                    color: failCount > 2
-                        ? Colors.red.shade50
-                        : Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color:
-                            failCount > 2 ? Colors.red : Colors.orange),
+                    color: cs.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(
-                    '$failCount Mängel',
-                    style: TextStyle(
-                        color: failCount > 2 ? Colors.red : Colors.orange,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12),
+                  child: Icon(
+                    isJacke
+                        ? Icons.accessibility_new
+                        : Icons.airline_seat_legroom_normal,
+                    color: cs.onPrimaryContainer,
+                    size: 24,
                   ),
                 ),
-            ]),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value: progress,
-              backgroundColor: Colors.grey.shade200,
-              color: _allAnswered
-                  ? (failCount == 0 ? Colors.green : Colors.orange)
-                  : Theme.of(context).colorScheme.primary,
-              minHeight: 8,
-              borderRadius: BorderRadius.circular(4),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.equipment.owner,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      Text(
+                        '${widget.equipment.article} · Gr. ${widget.equipment.size}',
+                        style: TextStyle(
+                            fontSize: 12, color: cs.onSurfaceVariant),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                // Letzte Prüfung kompakt
+                if (_lastInspection != null)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Letzte Prüfung',
+                          style: TextStyle(
+                              fontSize: 10, color: cs.onSurfaceVariant)),
+                      Text(
+                        DateFormat('dd.MM.yy')
+                            .format(_lastInspection!.inspectionDate),
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Prüfer + Datum
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _inspectorController,
+                    decoration: InputDecoration(
+                      labelText: 'Prüfer *',
+                      prefixIcon: const Icon(Icons.person_outline, size: 18),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      isDense: true,
+                    ),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Pflichtfeld' : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 140,
+                  child: TextFormField(
+                    controller: _inspectionDateController,
+                    readOnly: true,
+                    onTap: _selectInspectionDate,
+                    decoration: InputDecoration(
+                      labelText: 'Prüfdatum *',
+                      prefixIcon:
+                          const Icon(Icons.calendar_today, size: 18),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      isDense: true,
+                    ),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Pflichtfeld' : null,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -788,163 +574,220 @@ class _EquipmentInspectionFormScreenState
     );
   }
 
-  // ── Kategorie-Karte ────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KATEGORIE-CARD
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildCategoryCard(_CheckCategory cat) {
-    final answeredInCat = cat.items.where((i) => i.passed != null).length;
-    final failedInCat = cat.items.where((i) => i.passed == false).length;
+  Widget _buildCategoryCard(_CheckCategory cat, ColorScheme cs) {
+    final answered = cat.items.where((i) => i.passed != null).length;
+    final failed = cat.items.where((i) => i.passed == false).length;
+    final complete = answered == cat.items.length;
 
-    Color headerColor = Theme.of(context).colorScheme.primary;
-    if (answeredInCat == cat.items.length) {
-      headerColor = failedInCat == 0 ? Colors.green : Colors.red;
-    }
+    Color accent = cs.primary;
+    if (complete) accent = failed == 0 ? Colors.green : Colors.red;
 
     return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        children: [
-          // Kategorie-Kopf
-          Container(
-            width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: complete
+              ? accent.withOpacity(0.4)
+              : cs.outlineVariant.withOpacity(0.4),
+        ),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: !complete || failed > 0,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          childrenPadding: EdgeInsets.zero,
+          leading: Container(
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              color: headerColor.withOpacity(0.1),
-              borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12)),
-              border: Border(
-                  left: BorderSide(color: headerColor, width: 4)),
+              color: accent.withOpacity(0.12),
+              shape: BoxShape.circle,
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(cat.title,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: headerColor)),
-                ),
-                Text('$answeredInCat/${cat.items.length}',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                        fontWeight: FontWeight.w500)),
-                const SizedBox(width: 8),
-                // "Alle IO"-Schnellbutton
-                if (cat.items.any((i) => i.passed != true))
-                  GestureDetector(
-                    onTap: () => _setCategoryAllIO(cat),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade600,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.done_all, size: 13, color: Colors.white),
-                          SizedBox(width: 3),
-                          Text('Alle IO',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
+            child: complete
+                ? Icon(
+                    failed == 0 ? Icons.check_rounded : Icons.close_rounded,
+                    color: accent,
+                    size: 18)
+                : Center(
+                    child: Text('$answered/${cat.items.length}',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: accent)),
                   ),
-              ],
-            ),
           ),
-          // Prüfpunkte
-          ...cat.items.map((item) => _buildCheckItem(item)),
-        ],
+          title: Text(cat.title,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          subtitle: failed > 0
+              ? Text('$failed Mangel${failed > 1 ? 'punkte' : ''}',
+                  style: TextStyle(fontSize: 11, color: Colors.red.shade600))
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // "Alle IO"-Shortcut
+              if (!complete)
+                GestureDetector(
+                  onTap: () => _setCategoryAllIO(cat),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                          color: Colors.green.withOpacity(0.4)),
+                    ),
+                    child: const Text('Alle IO',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.green,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              const SizedBox(width: 6),
+              const Icon(Icons.expand_more, size: 20),
+            ],
+          ),
+          children: cat.items
+              .map((item) => _buildCheckItem(item, cat, cs))
+              .toList(),
+        ),
       ),
     );
   }
 
   // ── Einzelner Prüfpunkt ────────────────────────────────────────────────────
 
-  Widget _buildCheckItem(_CheckItem item) {
+  Widget _buildCheckItem(
+      _CheckItem item, _CheckCategory cat, ColorScheme cs) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isIO = item.passed == true;
+    final isNIO = item.passed == false;
+    final isPending = item.passed == null;
+
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-            bottom: BorderSide(color: Colors.grey.shade100, width: 1)),
+        border: Border(top: BorderSide(color: cs.outlineVariant.withOpacity(0.3))),
+        color: isNIO
+            ? (item.isCritical
+                ? Colors.red.withOpacity(isDark ? 0.14 : 0.07)
+                : Colors.red.withOpacity(isDark ? 0.08 : 0.04))
+            : Colors.transparent,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    item.label,
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: item.passed == false
-                            ? Colors.red.shade700
-                            : Colors.black87),
-                  ),
+                // Badges: Prüfart + k.o.
+                Row(
+                  children: [
+                    _checkTypeBadge(item.checkType, cs),
+                    if (item.isCritical) ...[
+                      const SizedBox(width: 5),
+                      _criticalBadge(isNIO),
+                    ],
+                  ],
                 ),
-                const SizedBox(width: 8),
-                // IO-Toggle-Buttons
-                _buildToggleButton(
-                  label: 'IO',
-                  icon: Icons.check,
-                  active: item.passed == true,
-                  activeColor: Colors.green,
-                  onTap: () => _setItemResult(item.id, true),
-                ),
-                const SizedBox(width: 6),
-                _buildToggleButton(
-                  label: 'NIO',
-                  icon: Icons.close,
-                  active: item.passed == false,
-                  activeColor: Colors.red,
-                  onTap: () => _setItemResult(item.id, false),
+                const SizedBox(height: 6),
+                // Label + Buttons
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Status-Icon
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Icon(
+                        isPending
+                            ? Icons.radio_button_unchecked
+                            : isIO
+                                ? Icons.check_circle_rounded
+                                : Icons.cancel_rounded,
+                        size: 16,
+                        color: isPending
+                            ? cs.onSurfaceVariant.withOpacity(0.4)
+                            : isIO
+                                ? Colors.green
+                                : Colors.red,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        item.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isNIO
+                              ? (item.isCritical
+                                  ? Colors.red.shade800
+                                  : Colors.red.shade700)
+                              : cs.onSurface,
+                          fontWeight: isNIO && item.isCritical
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _ioButton(
+                      label: 'IO',
+                      active: isIO,
+                      activeColor: Colors.green,
+                      onTap: () => _setItemResult(item.id, true),
+                    ),
+                    const SizedBox(width: 6),
+                    _ioButton(
+                      label: 'NIO',
+                      active: isNIO,
+                      activeColor: Colors.red,
+                      onTap: () => _setItemResult(item.id, false),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          // NIO-Kommentarfeld — erscheint nur wenn NIO gewählt
-          if (item.passed == false)
+          // NIO-Kommentar
+          if (isNIO)
             Padding(
-              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 10),
+              padding: const EdgeInsets.only(left: 38, right: 14, bottom: 10),
               child: TextField(
+                onChanged: (v) => item.comment = v,
+                controller: TextEditingController(text: item.comment)
+                  ..selection = TextSelection.fromPosition(
+                      TextPosition(offset: item.comment.length)),
                 decoration: InputDecoration(
-                  hintText: 'Mangel beschreiben ...',
-                  hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                  hintText: item.isCritical
+                      ? 'Art des sicherheitskritischen Mangels *'
+                      : 'Mangelbeschreibung (optional)',
+                  hintStyle:
+                      TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                   isDense: true,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(6),
-                    borderSide: BorderSide(color: Colors.red.shade200),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
-                    borderSide: BorderSide(color: Colors.red.shade400, width: 1.5),
+                    borderSide:
+                        BorderSide(color: Colors.red.withOpacity(0.4)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(6),
-                    borderSide: BorderSide(color: Colors.red.shade200),
+                    borderSide:
+                        BorderSide(color: Colors.red.withOpacity(0.3)),
                   ),
-                  filled: true,
-                  fillColor: Colors.red.shade50,
-                  prefixIcon: Icon(Icons.edit_note,
-                      size: 16, color: Colors.red.shade300),
                 ),
                 style: const TextStyle(fontSize: 12),
-                controller: TextEditingController(text: item.comment)
-                  ..selection = TextSelection.collapsed(offset: item.comment.length),
-                onChanged: (val) => item.comment = val,
               ),
             ),
         ],
@@ -952,9 +795,62 @@ class _EquipmentInspectionFormScreenState
     );
   }
 
-  Widget _buildToggleButton({
+  /// Badge: Sicht / Funktion / Dokument
+  Widget _checkTypeBadge(CheckType type, ColorScheme cs) {
+    final (label, icon, color) = switch (type) {
+      CheckType.visual => ('Sichtprüfung', Icons.visibility_outlined, Colors.blue),
+      CheckType.function => ('Funktionsprüfung', Icons.touch_app_outlined, Colors.purple),
+      CheckType.document => ('Dokumentprüfung', Icons.description_outlined, Colors.teal),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 10,
+                  color: color,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  /// k.o.-Badge — leuchtet rot wenn NIO
+  Widget _criticalBadge(bool isNio) {
+    final color = isNio ? Colors.red : Colors.red.shade300;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isNio ? Colors.red.withOpacity(0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(isNio ? 0.5 : 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.shield_outlined, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text('k.o.-Kriterium',
+              style: TextStyle(
+                  fontSize: 10,
+                  color: color,
+                  fontWeight: isNio ? FontWeight.bold : FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  Widget _ioButton({
     required String label,
-    required IconData icon,
     required bool active,
     required Color activeColor,
     required VoidCallback onTap,
@@ -964,192 +860,336 @@ class _EquipmentInspectionFormScreenState
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? activeColor : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(8),
+          color: active ? activeColor : activeColor.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-              color: active ? activeColor : Colors.grey.shade300,
+              color: active ? activeColor : activeColor.withOpacity(0.3),
               width: 1.5),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon,
-              size: 14,
-              color: active ? Colors.white : Colors.grey.shade500),
-          const SizedBox(width: 3),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: active ? Colors.white : Colors.grey.shade600)),
-        ]),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: active
+                ? Colors.white
+                : activeColor.withOpacity(0.7),
+          ),
+        ),
       ),
     );
   }
 
-  // ── Ergebnis-Zusammenfassung ───────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ERGEBNIS-CARD
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildResultSummaryCard() {
+  Widget _buildResultCard(ColorScheme cs) {
     final failCount = _failedItemIds.length;
-    Color resultColor;
-    IconData resultIcon;
-    String resultText;
-    String resultSubtext;
+    final criticalFailed = _failedCriticalItems;
+    final Color color;
+    final IconData icon;
+    final String title;
+    final String subtitle;
 
     if (!_allAnswered) {
-      resultColor = Colors.grey;
-      resultIcon = Icons.hourglass_empty;
-      resultText = 'Prüfung unvollständig';
-      resultSubtext =
-          'Noch ${_totalItems - _answeredItems} Punkte offen';
+      color = cs.primary;
+      icon = Icons.pending_outlined;
+      title = '$_answeredItems / $_totalItems bewertet';
+      subtitle = 'Noch ${_totalItems - _answeredItems} Punkte offen';
+    } else if (criticalFailed.isNotEmpty) {
+      color = Colors.red;
+      icon = Icons.dangerous_rounded;
+      title = 'Nicht bestanden – k.o.-Kriterium';
+      subtitle =
+          '${criticalFailed.length} sicherheitskritischer Mangel${criticalFailed.length > 1 ? 'punkte' : ''} · Status wird: In Reparatur';
     } else if (failCount == 0) {
-      resultColor = Colors.green;
-      resultIcon = Icons.check_circle;
-      resultText = 'Bestanden';
-      resultSubtext = 'Keine Mängel → Status: Einsatzbereit';
+      color = Colors.green;
+      icon = Icons.verified_rounded;
+      title = 'Bestanden';
+      subtitle = 'Keine Mängel · Status wird: Einsatzbereit';
     } else if (failCount <= 2) {
-      resultColor = Colors.orange;
-      resultIcon = Icons.warning;
-      resultText = 'Bedingt bestanden';
-      resultSubtext =
-          '$failCount geringfügige Mängel → Status: Einsatzbereit';
+      color = Colors.orange;
+      icon = Icons.warning_amber_rounded;
+      title = 'Bedingt bestanden';
+      subtitle = '$failCount Beobachtungsmangel${failCount > 1 ? 'punkte' : ''} · Status wird: Einsatzbereit';
     } else {
-      resultColor = Colors.red;
-      resultIcon = Icons.cancel;
-      resultText = 'Nicht bestanden';
-      resultSubtext =
-          '$failCount Mängel festgestellt → Status: In Reparatur';
+      color = Colors.red;
+      icon = Icons.cancel_rounded;
+      title = 'Nicht bestanden';
+      subtitle = '$failCount Mängel · Status wird: In Reparatur';
     }
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: resultColor, width: 2)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(children: [
-          CircleAvatar(
-            backgroundColor: resultColor.withOpacity(0.15),
-            radius: 28,
-            child: Icon(resultIcon, color: resultColor, size: 30),
+    return Column(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withOpacity(0.35), width: 1.5),
           ),
-          const SizedBox(width: 16),
-          Expanded(
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 36),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: color)),
+                    Text(subtitle,
+                        style: TextStyle(
+                            fontSize: 12, color: color.withOpacity(0.8))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        // k.o.-Mängel-Liste als Zusatzinfo
+        if (criticalFailed.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.red.withOpacity(0.2)),
+            ),
             child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Prüfergebnis',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey)),
-                  Text(resultText,
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: resultColor)),
-                  Text(resultSubtext,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Icon(Icons.report_outlined,
+                      size: 14, color: Colors.red.shade700),
+                  const SizedBox(width: 6),
+                  Text('Sicherheitskritische Mängel (k.o.):',
                       style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade700)),
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red.shade700)),
                 ]),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  // ── Kommentare ─────────────────────────────────────────────────────────────
-
-  Widget _buildCommentsCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.comment,
-                color: Theme.of(context).colorScheme.primary, size: 22),
-            const SizedBox(width: 10),
-            const Text('Bemerkungen',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _commentsController,
-            maxLines: 3,
-            decoration: InputDecoration(
-              hintText: 'Optionale Bemerkungen zur Prüfung ...',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              filled: true,
-              fillColor: Theme.of(context).colorScheme.surface,
+                const SizedBox(height: 6),
+                ...criticalFailed.map((item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('• ',
+                              style: TextStyle(
+                                  color: Colors.red.shade600, fontSize: 12)),
+                          Expanded(
+                            child: Text(item.label,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.red.shade700)),
+                          ),
+                        ],
+                      ),
+                    )),
+              ],
             ),
           ),
-        ]),
-      ),
+        ],
+      ],
     );
   }
 
-  // ── Nächstes Prüfdatum ─────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ABSCHLUSS-CARD (Kommentar + Nächste Prüfung)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildNextInspectionCard() {
+  Widget _buildFinishCard(ColorScheme cs) {
     return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: cs.outlineVariant.withOpacity(0.5)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.event_repeat,
-                color: Theme.of(context).colorScheme.primary, size: 22),
-            const SizedBox(width: 10),
-            const Text('Nächste Prüfung',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ]),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _nextInspectionDateController,
-            readOnly: true,
-            decoration: InputDecoration(
-              labelText: 'Nächstes Prüfdatum *',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              prefixIcon: const Icon(Icons.event_repeat),
-              filled: true,
-              fillColor: Theme.of(context).colorScheme.surface,
-              helperText: 'Standardmäßig 1 Jahr nach Prüfdatum',
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Nächste Prüfung
+            Row(
+              children: [
+                Icon(Icons.event_repeat, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                const Text('Nächste Prüfung',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14)),
+              ],
             ),
-            onTap: _selectNextInspectionDate,
-            validator: (v) =>
-                v == null || v.isEmpty ? 'Datum erforderlich' : null,
-          ),
-        ]),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _nextInspectionDateController,
+              readOnly: true,
+              onTap: _selectNextInspectionDate,
+              decoration: InputDecoration(
+                labelText: 'Nächstes Prüfdatum *',
+                prefixIcon: const Icon(Icons.calendar_today, size: 18),
+                helperText: 'Standard: 1 Jahr nach Prüfdatum',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+              ),
+              validator: (v) =>
+                  v == null || v.isEmpty ? 'Pflichtfeld' : null,
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Bemerkungen
+            Row(
+              children: [
+                Icon(Icons.comment_outlined, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                const Text('Bemerkungen (optional)',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _commentsController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Allgemeine Anmerkungen zur Prüfung …',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── Speichern-Button ───────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SPEICHERN-BUTTON
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildSaveButton() {
-    final canSave = _allAnswered;
-    return ElevatedButton.icon(
-      onPressed: canSave ? _saveInspection : null,
-      icon: const Icon(Icons.save),
-      label: Text(_isEditing
-          ? 'Prüfung aktualisieren'
-          : 'Prüfung abschließen & speichern'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: Colors.grey.shade300,
+  Widget _buildSaveButton(ColorScheme cs) {
+    return FilledButton.icon(
+      onPressed: _allAnswered ? _saveInspection : null,
+      icon: const Icon(Icons.save_rounded),
+      label: Text(
+        _isEditing ? 'Prüfung aktualisieren' : 'Prüfung abschließen & speichern',
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+      ),
+      style: FilledButton.styleFrom(
         minimumSize: const Size.fromHeight(52),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        disabledBackgroundColor: cs.onSurface.withOpacity(0.12),
       ),
     );
   }
+}
+
+// ─── Sticky Progress Bar ──────────────────────────────────────────────────────
+
+class _ProgressBarDelegate extends SliverPersistentHeaderDelegate {
+  final int answered;
+  final int total;
+  final int failed;
+  final bool allAnswered;
+  final Color primaryColor;
+
+  const _ProgressBarDelegate({
+    required this.answered,
+    required this.total,
+    required this.failed,
+    required this.allAnswered,
+    required this.primaryColor,
+  });
+
+  @override
+  double get minExtent => 52;
+  @override
+  double get maxExtent => 52;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final progress = total > 0 ? answered / total : 0.0;
+    final barColor = allAnswered
+        ? (failed == 0 ? Colors.green : (failed <= 2 ? Colors.orange : Colors.red))
+        : primaryColor;
+    final cs = Theme.of(context).colorScheme;
+
+    return Material(
+      color: cs.surface,
+      elevation: overlapsContent ? 2 : 0,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              children: [
+                Text(
+                  '$answered / $total Prüfpunkte',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurface),
+                ),
+                const Spacer(),
+                if (failed > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.red.withOpacity(0.4)),
+                    ),
+                    child: Text(
+                      '$failed Mangel${failed > 1 ? 'punkte' : ''}',
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  )
+                else if (allAnswered)
+                  Text('Vollständig ✓',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.green,
+                          fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 6,
+                backgroundColor: cs.outlineVariant.withOpacity(0.3),
+                valueColor: AlwaysStoppedAnimation(barColor),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(_ProgressBarDelegate old) =>
+      answered != old.answered ||
+      failed != old.failed ||
+      allAnswered != old.allAnswered;
 }

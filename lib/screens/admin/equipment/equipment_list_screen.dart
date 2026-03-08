@@ -143,12 +143,20 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                 _selectionMode = false;
               }),
             ),
-          ] else
+          ] else ...[
+            // ── Reinigungsschein-Button (immer sichtbar für berechtigte Nutzer) ──
+            if (_canEdit)
+              IconButton(
+                icon: const Icon(Icons.local_laundry_service),
+                onPressed: _openCleaningReceiptPicker,
+                tooltip: 'Reinigungsschein erstellen',
+              ),
             IconButton(
               icon: const Icon(Icons.filter_list),
               onPressed: _showFilterDialog,
               tooltip: 'Filter',
             ),
+          ],
         ],
       ),
       body: _isProcessingBatch
@@ -244,12 +252,10 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
                       final filtered =
                           _getFilteredEquipment(snapshot.data!);
-                      // Snapshot für Reinigungsschein-Zugriff zwischenspeichern
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted && _lastEquipmentSnapshot != snapshot.data!) {
-                          setState(() => _lastEquipmentSnapshot = snapshot.data!);
-                        }
-                      });
+
+                      // ✅ FIX: Direkte Zuweisung ohne setState/addPostFrameCallback
+                      // Verhindert Rebuild-Schleife → kein Flackern mehr
+                      _lastEquipmentSnapshot = snapshot.data!;
 
                       if (filtered.isEmpty) {
                         return const Center(
@@ -313,9 +319,9 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
         padding: const EdgeInsets.all(3),
         child: Row(
           children: [
-            _toggleBtn(_GroupMode.owner,   Icons.person_outline,                  'Besitzer'),
-            _toggleBtn(_GroupMode.status,  Icons.swap_horiz,                      'Status'),
-            _toggleBtn(_GroupMode.station, Icons.local_fire_department_outlined,  'Ortswehr'),
+            _toggleBtn(_GroupMode.owner,   Icons.person_outline,                 'Besitzer'),
+            _toggleBtn(_GroupMode.status,  Icons.swap_horiz,                     'Status'),
+            _toggleBtn(_GroupMode.station, Icons.local_fire_department_outlined, 'Ortswehr'),
           ],
         ),
       ),
@@ -363,9 +369,9 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
   Widget _buildGroupedList(List<EquipmentModel> list, _GroupMode mode) {
     String Function(EquipmentModel) keyOf;
     switch (mode) {
-      case _GroupMode.owner:   keyOf = (e) => e.owner;        break;
-      case _GroupMode.status:  keyOf = (e) => e.status;       break;
-      case _GroupMode.station: keyOf = (e) => e.fireStation;  break;
+      case _GroupMode.owner:   keyOf = (e) => e.owner;       break;
+      case _GroupMode.status:  keyOf = (e) => e.status;      break;
+      case _GroupMode.station: keyOf = (e) => e.fireStation; break;
     }
 
     final Map<String, List<EquipmentModel>> groups = {};
@@ -396,9 +402,9 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 100),
       itemCount: keys.length,
       itemBuilder: (context, i) {
-        final key    = keys[i];
-        final items  = groups[key]!;
-        final cs     = Theme.of(context).colorScheme;
+        final key   = keys[i];
+        final items = groups[key]!;
+        final cs    = Theme.of(context).colorScheme;
         final isDark = Theme.of(context).brightness == Brightness.dark;
 
         // Header-Farben je nach Modus
@@ -422,110 +428,105 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                 key.isNotEmpty ? key[0].toUpperCase() : '?',
                 style: TextStyle(
                     color: cs.onPrimary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
               ),
             );
             break;
           case _GroupMode.status:
-            headerIcon =
-                Icon(_statusIcon(key), size: 18, color: hdrFg);
+            headerIcon = Icon(
+              _statusIcon(key),
+              size: 18,
+              color: hdrFg,
+            );
             break;
           case _GroupMode.station:
-            headerIcon = Icon(Icons.local_fire_department,
-                size: 18,
-                color:
-                    isDark ? cs.onSurface : cs.onPrimaryContainer);
+            headerIcon = Icon(
+              Icons.local_fire_department,
+              size: 18,
+              color: hdrFg,
+            );
             break;
         }
 
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Material(
-            color: isDark ? cs.surfaceContainer : Colors.white,
-            elevation: isDark ? 0 : 2,
-            shadowColor: cs.shadow.withOpacity(0.08),
-            clipBehavior: Clip.hardEdge,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: isDark
-                  ? BorderSide(color: cs.outlineVariant, width: 1)
-                  : BorderSide.none,
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: mode == _GroupMode.status
+                  ? cs.outlineVariant.withOpacity(0.5)
+                  : cs.primary.withOpacity(0.15),
+              width: 1,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Gruppen-Header ───────────────────────────────────
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                  decoration: BoxDecoration(
-                    color: hdrBg,
-                    border: Border(
-                      bottom: BorderSide(
-                        color: isDark
-                            ? cs.outlineVariant.withOpacity(0.5)
-                            : cs.primary.withOpacity(0.15),
-                        width: 1,
+          ),
+          child: Column(
+            children: [
+              // ── Gruppen-Header ────────────────────────────────────
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: hdrBg,
+                  borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    headerIcon,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        key,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: hdrFg,
+                        ),
                       ),
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      headerIcon,
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          key,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            color: hdrFg,
-                          ),
-                        ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: mode == _GroupMode.status
+                            ? hdrFg.withOpacity(0.15)
+                            : cs.primary,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
+                      child: Text(
+                        '${items.length}',
+                        style: TextStyle(
                           color: mode == _GroupMode.status
-                              ? hdrFg.withOpacity(0.15)
-                              : cs.primary,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '${items.length}',
-                          style: TextStyle(
-                            color: mode == _GroupMode.status
-                                ? hdrFg
-                                : cs.onPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
-                          ),
+                              ? hdrFg
+                              : cs.onPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                // ── Items ────────────────────────────────────────────
-                ...items.asMap().entries.map((entry) {
-                  final idx  = entry.key;
-                  final item = entry.value;
-                  return Column(
-                    children: [
-                      if (idx > 0)
-                        Divider(
-                          height: 1,
-                          thickness: 1,
-                          indent: 60,
-                          color: cs.outlineVariant.withOpacity(0.4),
-                        ),
-                      _buildEquipmentTile(item, groupMode: mode),
-                    ],
-                  );
-                }),
-              ],
-            ),
+              ),
+              // ── Items ────────────────────────────────────────────
+              ...items.asMap().entries.map((entry) {
+                final idx  = entry.key;
+                final item = entry.value;
+                return Column(
+                  children: [
+                    if (idx > 0)
+                      Divider(
+                        height: 1,
+                        thickness: 1,
+                        indent: 60,
+                        color: cs.outlineVariant.withOpacity(0.4),
+                      ),
+                    _buildEquipmentTile(item, groupMode: mode),
+                  ],
+                );
+              }),
+            ],
           ),
         );
       },
@@ -601,8 +602,7 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
               : null,
           border: Border(left: BorderSide(color: accentColor, width: 3)),
         ),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -619,72 +619,97 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                     ? Icons.accessibility_new
                     : Icons.airline_seat_legroom_normal,
                 color: iconFg,
-                size: 19,
+                size: 20,
               ),
             ),
             const SizedBox(width: 12),
-            // Text
+
+            // Inhalt
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Zeile 1: Artikel · Größe
                   Text(
-                    equipment.article,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: cs.onSurface,
-                    ),
+                    '${equipment.article} · Gr. ${equipment.size}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      if (showOwner) equipment.owner,
-                      'Gr. ${equipment.size}',
-                    ].join(' · '),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: cs.onSurfaceVariant,
+                  const SizedBox(height: 3),
+                  // Zeile 2: Besitzer (wenn nicht nach Besitzer gruppiert)
+                  if (showOwner)
+                    Text(
+                      equipment.owner,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (showStation) ...[
-                    const SizedBox(height: 1),
+                  // Zeile 3: Ortswehr (wenn nicht nach Station gruppiert und Berechtigung)
+                  if (showStation && _canSeeAllStations)
                     Text(
                       equipment.fireStation,
                       style: TextStyle(
-                        fontSize: 11,
-                        color: cs.onSurfaceVariant.withOpacity(0.7),
-                      ),
-                    ),
-                  ],
-                  if (showStatus) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: chipColor,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        status,
-                        style: TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: chipText,
-                        ),
-                      ),
+                          color: cs.onSurfaceVariant.withOpacity(0.7)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
+                  const SizedBox(height: 4),
+                  // Zeile 4: Status-Chip + Prüfdatum
+                  Row(
+                    children: [
+                      if (showStatus)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: chipColor,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: chipText),
+                          ),
+                        ),
+                      if (showStatus) const SizedBox(width: 6),
+                      if (isOverdue)
+                        Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded,
+                                size: 12, color: Colors.red.shade600),
+                            const SizedBox(width: 2),
+                            Text(
+                              'Überfällig',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.red.shade600,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        )
+                      else
+                        Text(
+                          'Prüfung: ${DateFormat('dd.MM.yyyy').format(equipment.checkDate)}',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: cs.onSurfaceVariant.withOpacity(0.7)),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            if (_selectionMode)
+
+            // Trailing: Checkbox im Selektionsmodus, sonst Pfeil
+            if (_selectionMode && _canEdit)
               Icon(
                 isSelected
                     ? Icons.check_circle
@@ -765,8 +790,7 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                             if (s != 'Alle') ...[
                               Icon(EquipmentStatus.getStatusIcon(s),
                                   size: 16,
-                                  color:
-                                      EquipmentStatus.getStatusColor(s)),
+                                  color: EquipmentStatus.getStatusColor(s)),
                               const SizedBox(width: 8),
                             ],
                             Text(s),
@@ -804,13 +828,57 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
     );
   }
 
+  // ── Reinigungsschein-Picker (direkter Button) ─────────────────────────────
+
+  /// Öffnet ein ModalBottomSheet mit Checkbox-Auswahl aus dem aktuellen
+  /// Snapshot — kein Long-Press nötig.
+  Future<void> _openCleaningReceiptPicker() async {
+    if (_lastEquipmentSnapshot.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Noch keine Daten geladen – bitte kurz warten.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    final selected = await showModalBottomSheet<List<EquipmentModel>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _CleaningPickerSheet(
+        allEquipment: _lastEquipmentSnapshot,
+        canSeeAllStations: _canSeeAllStations,
+      ),
+    );
+
+    if (selected == null || selected.isEmpty || !mounted) return;
+
+    setState(() => _isProcessingBatch = true);
+    try {
+      await ExportService.exportStandaloneCleaningReceiptPdf(
+        context,
+        selected,
+        title: 'Reinigungsschein',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Fehler: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingBatch = false);
+    }
+  }
+
   // ── Batch-Aktionen ────────────────────────────────────────────────────────
 
   void _showCleaningReceiptDialog() {
     if (_selectedEquipmentIds.isEmpty) return;
-
-    // Snapshot der aktuell geladenen Daten holen — wird im StreamBuilder verwendet
-    // Daher über separate Methode mit dem letzten bekannten Stream-Snapshot
     _generateCleaningReceiptForSelected();
   }
 
@@ -949,5 +1017,280 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
       default:
         return isDark ? const Color(0xFFAAAAAA) : const Color(0xFF555555);
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REINIGUNGSSCHEIN-AUSWAHL-SHEET
+// Eigenständiges StatefulWidget – öffnet sich als ModalBottomSheet.
+// Gibt List<EquipmentModel> zurück (die ausgewählten Stücke).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _CleaningPickerSheet extends StatefulWidget {
+  final List<EquipmentModel> allEquipment;
+  final bool canSeeAllStations;
+
+  const _CleaningPickerSheet({
+    required this.allEquipment,
+    required this.canSeeAllStations,
+  });
+
+  @override
+  State<_CleaningPickerSheet> createState() => _CleaningPickerSheetState();
+}
+
+class _CleaningPickerSheetState extends State<_CleaningPickerSheet> {
+  final Set<String> _selected = {};
+  String _search = '';
+  String _filterType = 'Alle';
+
+  List<EquipmentModel> get _filtered {
+    var list = widget.allEquipment;
+    if (_filterType != 'Alle') {
+      list = list.where((e) => e.type == _filterType).toList();
+    }
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      list = list
+          .where((e) =>
+              e.owner.toLowerCase().contains(q) ||
+              e.article.toLowerCase().contains(q) ||
+              e.size.toLowerCase().contains(q) ||
+              (widget.canSeeAllStations &&
+                  e.fireStation.toLowerCase().contains(q)))
+          .toList();
+    }
+    // Alphabetisch nach Besitzer
+    list = List.from(list)..sort((a, b) => a.owner.compareTo(b.owner));
+    return list;
+  }
+
+  void _toggleAll() {
+    final ids = _filtered.map((e) => e.id).toSet();
+    setState(() {
+      if (ids.every(_selected.contains)) {
+        _selected.removeAll(ids);
+      } else {
+        _selected.addAll(ids);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final items = _filtered;
+    final allSelected =
+        items.isNotEmpty && items.every((e) => _selected.contains(e.id));
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.97,
+      expand: false,
+      builder: (_, scrollController) => Column(
+        children: [
+          // ── Griff ────────────────────────────────────────────────────
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 4),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: cs.onSurfaceVariant.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+
+          // ── Titel-Zeile ───────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+            child: Row(
+              children: [
+                Icon(Icons.local_laundry_service, color: cs.primary, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Reinigungsschein erstellen',
+                    style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface),
+                  ),
+                ),
+                // Alle auswählen / abwählen
+                TextButton(
+                  onPressed: _toggleAll,
+                  child: Text(allSelected ? 'Alle abwählen' : 'Alle wählen',
+                      style: const TextStyle(fontSize: 13)),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Suche + Typ-Filter ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Besitzer, Artikel, Größe…',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onChanged: (v) => setState(() => _search = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Typ-Toggle: Alle / Jacke / Hose
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'Alle', label: Text('Alle')),
+                    ButtonSegment(
+                        value: 'Jacke',
+                        icon: Icon(Icons.accessibility_new, size: 16)),
+                    ButtonSegment(
+                        value: 'Hose',
+                        icon: Icon(Icons.airline_seat_legroom_normal,
+                            size: 16)),
+                  ],
+                  selected: {_filterType},
+                  onSelectionChanged: (s) =>
+                      setState(() => _filterType = s.first),
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // ── Zähler-Info ───────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                Text(
+                  '${items.length} Kleidungsstücke',
+                  style: TextStyle(
+                      fontSize: 12, color: cs.onSurfaceVariant),
+                ),
+                const Spacer(),
+                if (_selected.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_selected.length} ausgewählt',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onPrimaryContainer),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // ── Liste ─────────────────────────────────────────────────────
+          Expanded(
+            child: items.isEmpty
+                ? const Center(child: Text('Keine Kleidungsstücke gefunden'))
+                : ListView.separated(
+                    controller: scrollController,
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, indent: 60),
+                    itemBuilder: (_, i) {
+                      final eq = items[i];
+                      final isSelected = _selected.contains(eq.id);
+                      final isJacke = eq.type == 'Jacke';
+                      return CheckboxListTile(
+                        value: isSelected,
+                        onChanged: (_) => setState(() {
+                          if (isSelected) {
+                            _selected.remove(eq.id);
+                          } else {
+                            _selected.add(eq.id);
+                          }
+                        }),
+                        secondary: CircleAvatar(
+                          backgroundColor: isJacke
+                              ? const Color(0xFFDBEAFB)
+                              : const Color(0xFFFFF0CC),
+                          radius: 18,
+                          child: Icon(
+                            isJacke
+                                ? Icons.accessibility_new
+                                : Icons.airline_seat_legroom_normal,
+                            size: 18,
+                            color: isJacke
+                                ? const Color(0xFF1565C0)
+                                : const Color(0xFFE65100),
+                          ),
+                        ),
+                        title: Text(
+                          '${eq.article} · Gr. ${eq.size}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14),
+                        ),
+                        subtitle: Text(
+                          widget.canSeeAllStations
+                              ? '${eq.owner} · ${eq.fireStation}'
+                              : eq.owner,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        activeColor: cs.primary,
+                        controlAffinity: ListTileControlAffinity.trailing,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                      );
+                    },
+                  ),
+          ),
+
+          // ── Bestätigungsbutton ────────────────────────────────────────
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _selected.isEmpty
+                      ? null
+                      : () {
+                          final items = widget.allEquipment
+                              .where((e) => _selected.contains(e.id))
+                              .toList();
+                          Navigator.pop(context, items);
+                        },
+                  icon: const Icon(Icons.picture_as_pdf),
+                  label: Text(
+                    _selected.isEmpty
+                        ? 'Kleidungsstücke auswählen'
+                        : 'PDF für ${_selected.length} Stück erstellen',
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

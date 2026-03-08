@@ -105,9 +105,9 @@ class PermissionService {
   // Einsatzkleidung
   Future<bool> canViewEquipment() async => (await _permissions()).equipmentView;
   Future<bool> canEditEquipment() async => (await _permissions()).equipmentEdit;
+  Future<bool> canEditEquipmentStatus() async => (await _permissions()).equipmentStatusEdit;
   Future<bool> canAddEquipment() async => (await _permissions()).equipmentAdd;
-  Future<bool> canDeleteEquipment() async =>
-      (await _permissions()).equipmentDelete;
+  Future<bool> canDeleteEquipment() async => (await _permissions()).equipmentDelete;
 
   // Einsätze
   Future<bool> canViewMissions() async => (await _permissions()).missionView;

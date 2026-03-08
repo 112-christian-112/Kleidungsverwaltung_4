@@ -418,22 +418,44 @@ class EquipmentService {
   }
 
   /// Status-Update: benötigt equipmentEdit- ODER inspectionPerform-Recht.
-  Future<void> updateStatus(String equipmentId, String newStatus,
-      {bool writeHistory = true}) async {
+  Future<void> updateStatus(
+      String equipmentId,
+      String newStatus, {
+        bool writeHistory = true,
+      }) async {
     final user = await _permissionService.getCurrentUser();
     if (user == null ||
-        (!user.isAdmin &&
-            !user.permissions.equipmentEdit &&
-            !user.permissions.inspectionPerform)) {
-      throw Exception('Keine Berechtigung zum Aktualisieren des Status');
+        (!user.isAdmin && !user.permissions.equipmentStatusEdit)) {
+      throw Exception('Keine Berechtigung zum Ändern des Status');
     }
     final currentUser = _auth.currentUser;
     if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
 
+    // Guard: "In Reparatur" → "Einsatzbereit" nur mit bestandener Prüfung
+    if (newStatus == EquipmentStatus.ready) {
+      final latestInspection = await _firestore
+          .collection('equipment_inspections')
+          .where('equipmentId', isEqualTo: equipmentId)
+          .orderBy('inspectionDate', descending: true)
+          .limit(1)
+          .get();
+
+      if (latestInspection.docs.isEmpty) {
+        throw Exception(
+            'Status kann nicht auf "Einsatzbereit" gesetzt werden — keine Prüfung vorhanden');
+      }
+
+      final result = latestInspection.docs.first.data()['result'] as String?;
+      if (result == 'failed') {
+        throw Exception(
+            'Status kann nicht auf "Einsatzbereit" gesetzt werden — letzte Prüfung nicht bestanden');
+      }
+    }
+
     String oldStatus = '';
     if (writeHistory) {
       final doc =
-          await _firestore.collection('equipment').doc(equipmentId).get();
+      await _firestore.collection('equipment').doc(equipmentId).get();
       oldStatus = (doc.data()?['status'] as String?) ?? '';
     }
 
@@ -457,11 +479,13 @@ class EquipmentService {
     }
   }
 
+  /// Waschzyklen ändern — benötigt equipmentStatusEdit ODER inspectionPerform.
+  /// (Prüfer sollen Waschzyklen manuell korrigieren können.)
   Future<void> updateWashCycles(String equipmentId, int newCount) async {
     final user = await _permissionService.getCurrentUser();
     if (user == null ||
         (!user.isAdmin &&
-            !user.permissions.equipmentEdit &&
+            !user.permissions.equipmentStatusEdit &&
             !user.permissions.inspectionPerform)) {
       throw Exception('Keine Berechtigung zum Aktualisieren der Waschzyklen');
     }
@@ -483,14 +507,13 @@ class EquipmentService {
     if (equipmentIds.isEmpty) return;
 
     final user = await _permissionService.getCurrentUser();
-    if (user == null || (!user.isAdmin && !user.permissions.equipmentEdit)) {
+    if (user == null ||
+        (!user.isAdmin && !user.permissions.equipmentStatusEdit)) {
       throw Exception('Keine Berechtigung zum Batch-Update des Status');
     }
     final currentUser = _auth.currentUser;
     if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
 
-    // Firestore Batch-Writes sind auf 500 Operationen begrenzt.
-    // Bei sehr großen Listen in Chunks à 400 aufteilen (Puffer für Sicherheit).
     const int batchLimit = 400;
     for (int i = 0; i < equipmentIds.length; i += batchLimit) {
       final end = (i + batchLimit < equipmentIds.length)
@@ -500,11 +523,14 @@ class EquipmentService {
 
       final batch = _firestore.batch();
       for (final id in chunk) {
-        batch.update(_firestore.collection('equipment').doc(id), {
-          'status': newStatus,
-          'updatedAt': Timestamp.now(),
-          'updatedBy': currentUser.uid,
-        });
+        batch.update(
+          _firestore.collection('equipment').doc(id),
+          {
+            'status': newStatus,
+            'updatedAt': Timestamp.now(),
+            'updatedBy': currentUser.uid,
+          },
+        );
       }
       await batch.commit();
     }

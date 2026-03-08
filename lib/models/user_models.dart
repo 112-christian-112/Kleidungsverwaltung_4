@@ -6,7 +6,8 @@ class UserPermissions {
 
   // Einsatzkleidung
   final bool equipmentView;
-  final bool equipmentEdit;
+  final bool equipmentEdit;       // Stammdaten: Artikel, Größe, Besitzer, …
+  final bool equipmentStatusEdit; // Status manuell ändern (entkoppelt von Edit)
   final bool equipmentAdd;
   final bool equipmentDelete;
 
@@ -20,7 +21,7 @@ class UserPermissions {
   final bool inspectionView;
   final bool inspectionEdit;
   final bool inspectionDelete;
-  final bool inspectionPerform;
+  final bool inspectionPerform; // Prüfung durchführen → setzt Status automatisch
 
   // Reinigung
   final bool cleaningView;
@@ -30,6 +31,7 @@ class UserPermissions {
     this.visibleFireStations = const [],
     this.equipmentView = false,
     this.equipmentEdit = false,
+    this.equipmentStatusEdit = false,
     this.equipmentAdd = false,
     this.equipmentDelete = false,
     this.missionView = false,
@@ -50,6 +52,7 @@ class UserPermissions {
       visibleFireStations: ['*'],
       equipmentView: true,
       equipmentEdit: true,
+      equipmentStatusEdit: true,
       equipmentAdd: true,
       equipmentDelete: true,
       missionView: true,
@@ -82,6 +85,9 @@ class UserPermissions {
       visibleFireStations: List<String>.from(map['visibleFireStations'] ?? []),
       equipmentView: map['perm_equipmentView'] ?? false,
       equipmentEdit: map['perm_equipmentEdit'] ?? false,
+      // Rückwärtskompatibilität: alte Dokumente ohne dieses Feld erben es
+      // von equipmentEdit, damit bestehende Admins/Zeugwarte nicht gesperrt werden.
+      equipmentStatusEdit: map['perm_equipmentStatusEdit'] ?? map['perm_equipmentEdit'] ?? false,
       equipmentAdd: map['perm_equipmentAdd'] ?? false,
       equipmentDelete: map['perm_equipmentDelete'] ?? false,
       missionView: map['perm_missionView'] ?? false,
@@ -103,6 +109,7 @@ class UserPermissions {
       'visibleFireStations': visibleFireStations,
       'perm_equipmentView': equipmentView,
       'perm_equipmentEdit': equipmentEdit,
+      'perm_equipmentStatusEdit': equipmentStatusEdit,
       'perm_equipmentAdd': equipmentAdd,
       'perm_equipmentDelete': equipmentDelete,
       'perm_missionView': missionView,
@@ -122,6 +129,7 @@ class UserPermissions {
     List<String>? visibleFireStations,
     bool? equipmentView,
     bool? equipmentEdit,
+    bool? equipmentStatusEdit,
     bool? equipmentAdd,
     bool? equipmentDelete,
     bool? missionView,
@@ -139,6 +147,7 @@ class UserPermissions {
       visibleFireStations: visibleFireStations ?? this.visibleFireStations,
       equipmentView: equipmentView ?? this.equipmentView,
       equipmentEdit: equipmentEdit ?? this.equipmentEdit,
+      equipmentStatusEdit: equipmentStatusEdit ?? this.equipmentStatusEdit,
       equipmentAdd: equipmentAdd ?? this.equipmentAdd,
       equipmentDelete: equipmentDelete ?? this.equipmentDelete,
       missionView: missionView ?? this.missionView,
@@ -183,7 +192,6 @@ class UserModel {
 
   bool get isAdmin => role == 'admin';
 
-  /// Ob der User eine bestimmte Ortswehr sehen darf
   bool canSeeFireStation(String station) {
     if (isAdmin) return true;
     if (permissions.visibleFireStations.contains('*')) return true;
@@ -194,7 +202,6 @@ class UserModel {
         station == fireStation;
   }
 
-  /// Schreibt Permissions als flache perm_-Felder direkt ins Dokument.
   Map<String, dynamic> toMap() {
     return {
       'uid': uid,
@@ -205,7 +212,6 @@ class UserModel {
       'isApproved': isApproved,
       'createdAt': createdAt,
       'approvedAt': approvedAt,
-      // Permissions werden flach eingebettet (kein verschachteltes Objekt)
       ...permissions.toMap(),
     };
   }
@@ -215,17 +221,13 @@ class UserModel {
     UserPermissions perms;
 
     if (role == 'admin') {
-      // Admins bekommen automatisch alle Rechte
       perms = UserPermissions.admin();
     } else if (map['perm_equipmentView'] != null) {
-      // Neue flache Struktur: perm_-Felder direkt im Dokument
       perms = UserPermissions.fromMap(map);
     } else if (map['permissions'] is Map) {
-      // Alte verschachtelte Struktur: Rückwärtskompatibilität
       perms = UserPermissions.fromMap(
           Map<String, dynamic>.from(map['permissions'] as Map));
     } else {
-      // Kein Eintrag vorhanden → Standard-Rechte
       perms = UserPermissions.defaultUser();
     }
 

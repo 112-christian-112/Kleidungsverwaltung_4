@@ -221,6 +221,7 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
               const SizedBox(height: 16),
 
               // ── Einsatzkleidung ─────────────────────────────────────────
+
               _PermissionsGroup(
                 title: 'Einsatzkleidung',
                 icon: Icons.checkroom,
@@ -233,10 +234,16 @@ class _UserPermissionsScreenState extends State<UserPermissionsScreen> {
                         _update(_permissions!.copyWith(equipmentView: v)),
                   ),
                   _PermRow(
-                    label: 'Bearbeiten',
+                    label: 'Stammdaten bearbeiten',
                     value: _permissions!.equipmentEdit,
                     onChanged: (v) =>
                         _update(_permissions!.copyWith(equipmentEdit: v)),
+                  ),
+                  _PermRow(
+                    label: 'Status ändern',
+                    value: _permissions!.equipmentStatusEdit,
+                    onChanged: (v) =>
+                        _update(_permissions!.copyWith(equipmentStatusEdit: v)),
                   ),
                   _PermRow(
                     label: 'Hinzufügen',
@@ -570,12 +577,14 @@ class _QuickTemplatesSection extends StatelessWidget {
                     cleaningView: true,
                   )),
                 ),
+
                 _TemplateChip(
                   label: 'Ortszeugwart',
                   icon: Icons.manage_accounts,
                   onTap: () => onApply(const UserPermissions(
                     equipmentView: true,
                     equipmentEdit: true,
+                    equipmentStatusEdit: true,   // NEU
                     equipmentAdd: true,
                     missionView: true,
                     missionAdd: true,
@@ -586,12 +595,23 @@ class _QuickTemplatesSection extends StatelessWidget {
                   )),
                 ),
                 _TemplateChip(
+                  label: 'Prüfer',                    // NEU: eigene Vorlage
+                  icon: Icons.fact_check_outlined,
+                  onTap: () => onApply(const UserPermissions(
+                    equipmentView: true,
+                    inspectionView: true,
+                    inspectionPerform: true,
+                    cleaningView: true,
+                  )),
+                ),
+                _TemplateChip(
                   label: 'Alle Rechte',
                   icon: Icons.admin_panel_settings,
                   onTap: () => onApply(UserPermissions(
                     visibleFireStations: const ['*'],
                     equipmentView: true,
                     equipmentEdit: true,
+                    equipmentStatusEdit: true,   // NEU
                     equipmentAdd: true,
                     equipmentDelete: true,
                     missionView: true,
