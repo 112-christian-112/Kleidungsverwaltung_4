@@ -1,18 +1,21 @@
-// screens/admin/equipment/add_equipment_screen.dart
+// screens/add_equipment_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import '../../../models/equipment_model.dart';
-import '../../../models/equipment_inspection_model.dart';
-import '../../../services/equipment_service.dart';
-import '../../../services/equipment_inspection_service.dart';
-import '../../../services/barcode_service.dart';
-import '../../../services/permission_service.dart';
+import '../models/equipment_model.dart';
+import '../models/equipment_inspection_model.dart';
+import '../services/equipment_service.dart';
+import '../services/equipment_inspection_service.dart';
+import '../services/permission_service.dart';
+import '../Lists/fire_stations.dart';
+import '../Lists/equipment_data.dart';
 import 'admin/equipment/barcode_scanner_screen.dart';
 import 'admin/equipment/nfc_scanner_screen.dart';
-
+import 'admin/equipment/equipment_detail_screen.dart';
+import '../widgets/nfc_scan_sheet.dart';
 
 class AddEquipmentScreen extends StatefulWidget {
   const AddEquipmentScreen({Key? key}) : super(key: key);
@@ -21,1258 +24,1265 @@ class AddEquipmentScreen extends StatefulWidget {
   State<AddEquipmentScreen> createState() => _AddEquipmentScreenState();
 }
 
-class _AddEquipmentScreenState extends State<AddEquipmentScreen> with TickerProviderStateMixin {
+class _AddEquipmentScreenState extends State<AddEquipmentScreen> {
   final _formKey = GlobalKey<FormState>();
   final EquipmentService _equipmentService = EquipmentService();
-  final EquipmentInspectionService _inspectionService = EquipmentInspectionService();
+  final EquipmentInspectionService _inspectionService =
+      EquipmentInspectionService();
   final PermissionService _permissionService = PermissionService();
 
   // Controllers
-  final TextEditingController _nfcTagController = TextEditingController();
-  final TextEditingController _barcodeController = TextEditingController();
-  final TextEditingController _sizeController = TextEditingController();
-  final TextEditingController _ownerController = TextEditingController();
-  final TextEditingController _checkDateController = TextEditingController();
+  final TextEditingController _sizeController    = TextEditingController();
+  final TextEditingController _ownerController   = TextEditingController();
+  final TextEditingController _articleSearchController = TextEditingController();
 
-  // State variables
-  String _nfcTag = '';
-  String _barcode = '';
-  String _article = 'Viking Performer Evolution Einsatzjacke AGT';
-  String _type = 'Jacke';
-  String _fireStation = 'Esklum';
-  String _status = EquipmentStatus.ready;
-  String _userFireStation = '';
+  // State
+  String _nfcTag      = '';
+  String _barcode     = '';
+  String _article     = '';
+  String _type        = 'Jacke';
+  String _fireStation = FireStations.all.first;
+  String _status      = EquipmentStatus.ready;
+  bool   _isLoading   = false;
+  bool   _isAdmin     = false;
+  bool   _articleSearchOpen = false;
+  DateTime _checkDate = DateTime.now().add(const Duration(days: 365));
 
-  bool _isLoading = false;
-  bool _isAdmin = false;
-  DateTime _selectedCheckDate = DateTime.now().add(const Duration(days: 365)); // Ein Jahr in die Zukunft
+  // Artikel-Suche — Daten kommen aus EquipmentData
+  List<Map<String, String>> get _filteredArticles =>
+      EquipmentData.search(_articleSearchController.text);
 
-  // Animation controllers
-  late AnimationController _nfcAnimationController;
-  late AnimationController _barcodeAnimationController;
-  late Animation<double> _nfcAnimation;
-  late Animation<double> _barcodeAnimation;
-
-  // Predefined values
-  final List<String> _articles = [
-    'Viking Performer Evolution Einsatzjacke AGT',
-    'Viking Performer Evolution Einsatzhose AGT',
-    'Viking Einsatzhose TH Assistance',
-    'Viking Einsatzjacke TH Assistance'
-  ];
-
-  final List<String> _types = ['Jacke', 'Hose'];
-
-  final List<String> _fireStations = [
-    'Esklum',
-    'Breinermoor',
-    'Grotegaste',
-    'Flachsmeer',
-    'Folmhusen',
-    'Großwolde',
-    'Ihrhove',
-    'Ihren',
-    'Steenfelde',
-    'Völlen',
-    'Völlenerfehn',
-    'Völlenerkönigsfehn'
-  ];
-
-  final List<String> _commonSizes = [
-    'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL',
-    '36', '38', '40', '42', '44', '46', '48', '50', '52', '54', '56'
-  ];
+  // Größen-Suche
+  final TextEditingController _sizeSearchController = TextEditingController();
+  bool _sizePickerOpen = false;
+  List<String> get _filteredSizes =>
+      EquipmentData.searchSizes(_sizeSearchController.text);
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
-    _loadUserData();
-    // Standardmäßig Prüfdatum auf ein Jahr von heute setzen
-    final futureDate = DateTime.now().add(const Duration(days: 365));
-    _selectedCheckDate = futureDate;
-    _checkDateController.text = DateFormat('dd.MM.yyyy').format(futureDate);
-  }
-
-  void _initializeAnimations() {
-    _nfcAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    _barcodeAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-
-    _nfcAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _nfcAnimationController, curve: Curves.elasticOut),
-    );
-    _barcodeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _barcodeAnimationController, curve: Curves.elasticOut),
-    );
-  }
-
-  Future<void> _loadUserData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final isAdmin = await _permissionService.isAdmin();
-      final userFireStation = await _permissionService.getUserFireStation();
-
-      if (mounted) {
-        setState(() {
-          _isAdmin = isAdmin;
-          _userFireStation = userFireStation;
-          _fireStation = userFireStation; // Standardwert auf Benutzer-Feuerwehr setzen
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      print('Fehler beim Laden der Benutzerdaten: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _createInitialInspection(String equipmentId, String inspectorName) async {
-    try {
-      // Prüfung für heute mit "bestanden" und Kommentar "Neuer Artikel"
-      final inspection = EquipmentInspectionModel(
-        id: '', // Wird von Firestore generiert
-        equipmentId: equipmentId, // Korrekte Equipment-ID verwenden
-        inspectionDate: DateTime.now(), // Heutiges Datum
-        inspector: inspectorName,
-        result: InspectionResult.passed, // Bestanden
-        comments: 'Neuer Artikel - Erstprüfung bei Anlage',
-        nextInspectionDate: _selectedCheckDate, // Das gewählte Prüfdatum (ein Jahr später)
-        issues: null, // Keine Mängel bei neuem Artikel
-        createdAt: DateTime.now(),
-        createdBy: inspectorName,
-      );
-
-      await _inspectionService.addInspection(inspection);
-    } catch (e) {
-      print('Fehler beim Erstellen der automatischen Prüfung: $e');
-      // Fehler nicht weiterwerfen, da die Hauptfunktion (Equipment anlegen) erfolgreich war
-    }
+    _loadUser();
+    _articleSearchController.addListener(() => setState(() {}));
+    _sizeSearchController.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
-    _nfcTagController.dispose();
-    _barcodeController.dispose();
     _sizeController.dispose();
     _ownerController.dispose();
-    _checkDateController.dispose();
-    _nfcAnimationController.dispose();
-    _barcodeAnimationController.dispose();
+    _articleSearchController.dispose();
+    _sizeSearchController.dispose();
     super.dispose();
   }
 
-  Future<void> _scanNfcTag() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const NfcScannerScreen(),
-      ),
-    );
-
-    if (result != null && result is String) {
-      setState(() {
-        _nfcTag = result;
-        _nfcTagController.text = result;
-      });
-      _nfcAnimationController.forward().then((_) {
-        _nfcAnimationController.reset();
-      });
-
-      // Vibration feedback
-      HapticFeedback.lightImpact();
+  Future<void> _loadUser() async {
+    setState(() => _isLoading = true);
+    try {
+      final user = await _permissionService.getCurrentUser();
+      if (mounted && user != null) {
+        setState(() {
+          _isAdmin      = user.isAdmin;
+          _fireStation  = user.fireStation.isNotEmpty
+              ? user.fireStation
+              : FireStations.all.first;
+          _isLoading    = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _scanBarcode() async {
+  // ── NFC / Barcode ─────────────────────────────────────────────────────────
+
+  Future<void> _scanNfc() async {
+    // Modernes BottomSheet statt eigenem Screen
+    final tagId = await NfcScanSheet.zeigen(
+      context,
+      hinweisText: 'NFC-Tag an die Rückseite des Geräts halten',
+    );
+    if (tagId == null || tagId.isEmpty || !mounted) return;
+
+    // Duplikat-Prüfung in Firestore
+    setState(() => _isLoading = true);
     try {
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const BarcodeScannerScreen(),
-        ),
-      );
+      final existing = await _equipmentService.getEquipmentByNfcTag(tagId);
+      if (!mounted) return;
 
-      if (result != null && result is String && result.isNotEmpty) {
+      if (existing != null) {
+        // Tag bereits vergeben → Dialog anzeigen
+        setState(() => _isLoading = false);
+        await _showDuplicateDialog(existing, tagId);
+      } else {
+        // Tag frei → übernehmen
         setState(() {
-          _barcode = result;
-          _barcodeController.text = result;
+          _nfcTag  = tagId;
+          _isLoading = false;
         });
-        _barcodeAnimationController.forward().then((_) {
-          _barcodeAnimationController.reset();
-        });
-
-        // Vibration feedback
         HapticFeedback.lightImpact();
       }
     } catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Fehler beim Barcode-Scan: $e');
+        setState(() => _isLoading = false);
+        _snack('Fehler bei Duplikat-Prüfung: $e', isError: true);
       }
     }
   }
 
-  void _generateOwnerFromNfc(String nfcTag) {
-    // Einfache Logik zur Besitzer-Generierung basierend auf NFC-Tag
-    // Dies kann je nach NFC-Tag-Schema angepasst werden
-    if (nfcTag.length >= 4) {
-      String prefix = nfcTag.substring(0, 2).toUpperCase();
-      String suffix = nfcTag.substring(nfcTag.length - 2);
-      setState(() {
-        _ownerController.text = 'Benutzer-$prefix$suffix';
-      });
-    }
-  }
-
-  Future<void> _selectCheckDate() async {
-    // Funktion nicht mehr benötigt, aber behalten für eventuelle zukünftige Verwendung
-    return;
-  }
-
-  void _setTypeBasedOnArticle(String article) {
-    setState(() {
-      _article = article;
-
-      // Automatische Typ-Erkennung
-      if (article.toLowerCase().contains('jacke')) {
-        _type = 'Jacke';
-      } else if (article.toLowerCase().contains('hose')) {
-        _type = 'Hose';
-      }
-    });
-  }
-
-  Future<void> _validateAndSave() async {
-    // Erweiterte Validierung
-    if (_nfcTag.isEmpty) {
-      _showErrorSnackBar('Bitte scannen Sie einen NFC-Tag');
-      return;
-    }
-
-    // Formular validieren (ohne NFC-Tag, da das bereits geprüft wurde)
-    if (_formKey.currentState!.validate()) {
-      await _saveEquipment();
-    }
-  }
-
-  Future<void> _saveEquipment() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null) {
-        throw Exception('Kein Benutzer angemeldet');
-      }
-
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-
-      // Finalen NFC-Tag bestimmen
-      String finalNfcTag = _nfcTag;
-
-      // Finalen Artikel bestimmen
-      String finalArticle = _article;
-
-      EquipmentModel newEquipment = EquipmentModel(
-        id: '',
-        nfcTag: finalNfcTag,
-        barcode: _barcode.isNotEmpty ? _barcode : (_barcodeController.text.isNotEmpty ? _barcodeController.text.trim() : null),
-        article: finalArticle,
-        type: _type,
-        size: _sizeController.text.trim(),
-        fireStation: _fireStation,
-        owner: _ownerController.text.trim(),
-        washCycles: 0,
-        checkDate: _selectedCheckDate,
-        createdAt: DateTime.now(),
-        createdBy: userData['name'] ?? currentUser.email ?? '',
-        status: _status,
-      );
-
-      // Equipment speichern und DocumentReference erhalten
-      DocumentReference docRef = await _equipmentService.addEquipment(newEquipment);
-
-      // Automatische Prüfung erstellen mit der korrekten Equipment-ID
-      await _createInitialInspection(docRef.id, userData['name'] ?? currentUser.email ?? '');
-
-      if (mounted) {
-        _showSuccessSnackBar('Einsatzkleidung und Erstprüfung erfolgreich angelegt');
-        _resetForm();
-      }
-    } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Fehler: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  void _resetForm() {
-    setState(() {
-      _nfcTag = '';
-      _barcode = '';
-      _article = _articles.first;
-      _type = 'Jacke';
-      _fireStation = _userFireStation.isNotEmpty ? _userFireStation : _fireStations.first;
-      _status = EquipmentStatus.ready;
-      _selectedCheckDate = DateTime.now().add(const Duration(days: 365)); // Ein Jahr in die Zukunft
-    });
-
-    _nfcTagController.clear();
-    _barcodeController.clear();
-    _sizeController.clear();
-    _ownerController.clear();
-    _checkDateController.text = DateFormat('dd.MM.yyyy').format(DateTime.now().add(const Duration(days: 365)));
-  }
-
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'OK',
-          textColor: Colors.white,
-          onPressed: () {},
-        ),
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading && _userFireStation.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Einsatzkleidung anlegen')),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Einsatzkleidung anlegen'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => _showHelpDialog(),
-            tooltip: 'Hilfe',
-          ),
-        ],
-      ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildScanningSection(),
-              const SizedBox(height: 24),
-              _buildArticleSection(),
-              const SizedBox(height: 24),
-              _buildAssignmentSection(),
-              const SizedBox(height: 24),
-              _buildInspectionSection(),
-              const SizedBox(height: 24),
-              _buildStatusSection(),
-              const SizedBox(height: 32),
-              _buildSaveButton(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildScanningSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
+  Future<void> _showDuplicateDialog(
+      EquipmentModel existing, String tagId) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded,
+            color: Colors.orange, size: 36),
+        title: const Text('NFC-Tag bereits vergeben'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.qr_code_scanner, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text(
-                  'Identifikation',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ],
+            Text(
+              'Dieser Tag ist bereits der folgenden Kleidung zugewiesen:',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            const SizedBox(height: 20),
-
-            // NFC-Tag Sektion
-            AnimatedBuilder(
-              animation: _nfcAnimation,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: 1.0 + (_nfcAnimation.value * 0.05),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: _nfcTag.isNotEmpty
-                          ? Colors.green.withOpacity(0.1)
-                          : Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _nfcTag.isNotEmpty ? Colors.green : Colors.grey.shade300,
-                        width: _nfcTag.isNotEmpty ? 2 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.nfc,
-                              color: _nfcTag.isNotEmpty ? Colors.green : Colors.grey,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'NFC-Tag (erforderlich)',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _nfcTag.isNotEmpty ? Colors.green : null,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_nfcTag.isNotEmpty)
-                              const Icon(Icons.check_circle, color: Colors.green),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Hinweis für neuen Artikel
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.blue.withOpacity(0.3),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.info_outline,
-                                color: Colors.blue,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Bei neuen Artikeln wird automatisch eine bestandene Erstprüfung mit dem Kommentar "Neuer Artikel" erstellt.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.blue.shade700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: _nfcTagController,
-                                readOnly: true, // Nur-Lese-Modus
-                                decoration: InputDecoration(
-                                  hintText: _nfcTag.isNotEmpty ? _nfcTag : 'NFC-Tag scannen',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                  filled: true,
-                                  fillColor: Colors.grey.shade100, // Grauer Hintergrund für Read-Only
-                                ),
-                                validator: (value) {
-                                  if (_nfcTag.isEmpty) {
-                                    return 'NFC-Tag ist erforderlich';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            ElevatedButton.icon(
-                              onPressed: _scanNfcTag,
-                              icon: const Icon(Icons.nfc),
-                              label: const Text('Scannen'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 16),
-
-            // Barcode Sektion
-            AnimatedBuilder(
-              animation: _barcodeAnimation,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: 1.0 + (_barcodeAnimation.value * 0.05),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: _barcode.isNotEmpty
-                          ? Colors.blue.withOpacity(0.1)
-                          : Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _barcode.isNotEmpty ? Colors.blue : Colors.grey.shade300,
-                        width: _barcode.isNotEmpty ? 2 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.qr_code,
-                              color: _barcode.isNotEmpty ? Colors.blue : Colors.grey,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Barcode (optional)',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _barcode.isNotEmpty ? Colors.blue : null,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_barcode.isNotEmpty)
-                              const Icon(Icons.check_circle, color: Colors.blue),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: _barcodeController,
-                                decoration: InputDecoration(
-                                  hintText: _barcode.isNotEmpty ? _barcode : 'Barcode scannen oder manuell eingeben',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  suffixIcon: _barcodeController.text.isNotEmpty
-                                      ? IconButton(
-                                    icon: const Icon(Icons.clear),
-                                    onPressed: () {
-                                      setState(() {
-                                        _barcodeController.clear();
-                                        _barcode = '';
-                                      });
-                                    },
-                                  )
-                                      : null,
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _barcode = value;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            ElevatedButton.icon(
-                              onPressed: _scanBarcode,
-                              icon: const Icon(Icons.qr_code_scanner),
-                              label: const Text('Scannen'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildArticleSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.inventory_2, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text(
-                  'Artikelinformationen',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Artikel Dropdown
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: 'Artikel',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.category),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-              ),
-              value: _article,
-              items: _articles.map((String article) {
-                return DropdownMenuItem<String>(
-                  value: article,
-                  child: Text(
-                    article,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
-              onChanged: (String? newValue) {
-                if (newValue != null) {
-                  _setTypeBasedOnArticle(newValue);
-                }
-              },
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Bitte wählen Sie einen Artikel aus';
-                }
-                return null;
-              },
-            ),
-
-            const SizedBox(height: 16),
-
-            // Typ und Größe in einer Reihe
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                        width: 1,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.style,
-                              color: Theme.of(context).colorScheme.primary,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Typ',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const Spacer(),
-                            Icon(
-                              Icons.auto_awesome,
-                              color: Theme.of(context).colorScheme.primary,
-                              size: 14,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _type,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Automatisch bestimmt',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.secondary,
-                            fontSize: 11,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: TextFormField(
-                    controller: _sizeController,
-                    decoration: InputDecoration(
-                      labelText: 'Größe',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.format_size),
-                      filled: true,
-                      fillColor: Theme.of(context).colorScheme.surface,
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Größe erforderlich';
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            // Größen-Chips
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: _commonSizes.map((size) {
-                return ActionChip(
-                  label: Text(size),
-                  onPressed: () {
-                    setState(() {
-                      _sizeController.text = size;
-                    });
-                  },
-                  backgroundColor: _sizeController.text == size
-                      ? Theme.of(context).colorScheme.primary.withOpacity(0.2)
-                      : null,
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAssignmentSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.assignment_ind, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text(
-                  'Zuordnung',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Ortsfeuerwehr (nur für Admins editierbar)
-            DropdownButtonFormField<String>(
-              decoration: InputDecoration(
-                labelText: 'Ortsfeuerwehr',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.location_city),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-              ),
-              value: _fireStation,
-              items: _fireStations.map((String station) {
-                return DropdownMenuItem<String>(
-                  value: station,
-                  child: Text(station),
-                );
-              }).toList(),
-              onChanged: _isAdmin ? (String? newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _fireStation = newValue;
-                  });
-                }
-              } : null,
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Bitte wählen Sie eine Ortsfeuerwehr aus';
-                }
-                return null;
-              },
-            ),
-
-            if (!_isAdmin) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Hinweis: Als Nicht-Administrator können Sie nur Ausrüstung für Ihre eigene Feuerwehr anlegen.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.secondary,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 16),
-
-            // Besitzer
-            TextFormField(
-              controller: _ownerController,
-              decoration: InputDecoration(
-                labelText: 'Besitzer',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.person),
-                filled: true,
-                fillColor: Theme.of(context).colorScheme.surface,
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Bitte geben Sie einen Besitzer ein';
-                }
-                return null;
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInspectionSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.fact_check, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text(
-                  'Prüfinformationen',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Prüfdatum - Elegante Info-Box
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.green.withOpacity(0.3),
-                  width: 1,
-                ),
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.event,
-                        color: Colors.green,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Nächstes Prüfdatum',
-                        style: TextStyle(
-                          color: Colors.green,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          'Auto',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    DateFormat('dd.MM.yyyy').format(_selectedCheckDate),
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  Text(existing.article,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 4),
-                  Text(
-                    'Automatisch auf 1 Jahr ab heute gesetzt',
-                    style: TextStyle(
-                      color: Colors.green.shade700,
-                      fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.flag, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text(
-                  'Status',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Status als Chips-Auswahl
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: EquipmentStatus.values.map((status) {
-                final isSelected = _status == status;
-                return InkWell(
-                  onTap: () {
-                    setState(() {
-                      _status = status;
-                    });
-                    HapticFeedback.selectionClick();
-                  },
-                  borderRadius: BorderRadius.circular(25),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? EquipmentStatus.getStatusColor(status).withOpacity(0.2)
-                          : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(25),
-                      border: Border.all(
-                        color: isSelected
-                            ? EquipmentStatus.getStatusColor(status)
-                            : Colors.grey.shade300,
-                        width: isSelected ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          EquipmentStatus.getStatusIcon(status),
-                          color: isSelected
-                              ? EquipmentStatus.getStatusColor(status)
-                              : Colors.grey,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          status,
-                          style: TextStyle(
-                            color: isSelected
-                                ? EquipmentStatus.getStatusColor(status)
-                                : Colors.grey.shade700,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        if (isSelected) ...[
-                          const SizedBox(width: 8),
-                          Icon(
-                            Icons.check_circle,
-                            color: EquipmentStatus.getStatusColor(status),
-                            size: 16,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Status-Erklärung
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: EquipmentStatus.getStatusColor(_status).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: EquipmentStatus.getStatusColor(_status).withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    color: EquipmentStatus.getStatusColor(_status),
-                    size: 16,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _getStatusDescription(_status),
+                  Text('${existing.owner} · Gr. ${existing.size}',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: EquipmentStatus.getStatusColor(_status),
-                      ),
-                    ),
-                  ),
+                          fontSize: 13,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant)),
+                  Text(existing.fireStation,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant)),
                 ],
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  String _getStatusDescription(String status) {
-    switch (status) {
-      case EquipmentStatus.ready:
-        return 'Die Ausrüstung ist einsatzbereit und kann verwendet werden.';
-      case EquipmentStatus.cleaning:
-        return 'Die Ausrüstung befindet sich in der Reinigung und ist temporär nicht verfügbar.';
-      case EquipmentStatus.repair:
-        return 'Die Ausrüstung ist defekt und muss repariert werden.';
-      case EquipmentStatus.retired:
-        return 'Die Ausrüstung ist ausgemustert und darf nicht mehr verwendet werden.';
-      default:
-        return 'Unbekannter Status.';
-    }
-  }
-
-  Widget _buildSaveButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _validateAndSave,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 2,
-        ),
-        child: _isLoading
-            ? const SizedBox(
-          height: 24,
-          width: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        )
-            : const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.save, size: 24),
-            SizedBox(width: 12),
-            Text(
-              'Einsatzkleidung anlegen',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showHelpDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: Colors.blue),
-            SizedBox(width: 8),
-            Text('Hilfe'),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHelpItem(
-                'NFC-Tag scannen',
-                'Halten Sie Ihr Gerät an den NFC-Tag. Der Tag wird automatisch erkannt und kann nicht manuell geändert werden.',
-                Icons.nfc,
-              ),
-              const SizedBox(height: 16),
-              _buildHelpItem(
-                'Barcode scannen',
-                'Richten Sie die Kamera auf den Barcode. Der Code wird automatisch erkannt.',
-                Icons.qr_code_scanner,
-              ),
-              const SizedBox(height: 16),
-              _buildHelpItem(
-                'Prüfdatum',
-                'Das nächste Prüfdatum wird automatisch auf 1 Jahr ab heute gesetzt. Bei Anlage wird eine bestandene Erstprüfung erstellt.',
-                Icons.event,
-              ),
-              const SizedBox(height: 16),
-              _buildHelpItem(
-                'Automatische Prüfung',
-                'Beim Anlegen wird automatisch eine bestandene Prüfung mit "Neuer Artikel" als Kommentar erstellt.',
-                Icons.verified,
-              ),
-            ],
-          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Verstanden'),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Erneut scannen'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      EquipmentDetailScreen(equipment: existing),
+                ),
+              );
+            },
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Artikel öffnen'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHelpItem(String title, String description, IconData icon) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: Colors.blue, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
+  Future<void> _scanBarcode() async {
+    final result = await Navigator.push<String>(context,
+        MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()));
+    if (result != null && result.isNotEmpty && mounted) {
+      setState(() => _barcode = result);
+      HapticFeedback.lightImpact();
+    }
+  }
+
+  // ── Speichern ─────────────────────────────────────────────────────────────
+
+  Future<void> _save() async {
+    if (_nfcTag.isEmpty) {
+      _snack('Bitte NFC-Tag scannen', isError: true);
+      return;
+    }
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final authUser = FirebaseAuth.instance.currentUser;
+      if (authUser == null) throw Exception('Nicht angemeldet');
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(authUser.uid)
+          .get();
+      final userName =
+          (userDoc.data() as Map<String, dynamic>?)?['name'] ?? authUser.email ?? '';
+
+      final equipment = EquipmentModel(
+        id:          '',
+        nfcTag:      _nfcTag,
+        barcode:     _barcode.isNotEmpty ? _barcode : null,
+        article:     _article,
+        type:        _type,
+        size:        _sizeController.text.trim(),
+        fireStation: _fireStation,
+        owner:       _ownerController.text.trim(),
+        washCycles:  0,
+        checkDate:   _checkDate,
+        createdAt:   DateTime.now(),
+        createdBy:   userName,
+        status:      _status,
+      );
+
+      final ref = await _equipmentService.addEquipment(equipment);
+
+      // Erstprüfung anlegen
+      await _inspectionService.addInspection(EquipmentInspectionModel(
+        id:                  '',
+        equipmentId:         ref.id,
+        inspectionDate:      DateTime.now(),
+        inspector:           userName,
+        result:              InspectionResult.passed,
+        comments:            'Neuer Artikel – Erstprüfung bei Anlage',
+        nextInspectionDate:  _checkDate,
+        issues:              null,
+        createdAt:           DateTime.now(),
+        createdBy:           userName,
+      ));
+
+      if (mounted) {
+        _snack('Einsatzkleidung erfolgreich angelegt');
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) _snack('Fehler: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _snack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? Colors.red : Colors.green,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading && _fireStation.isEmpty) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
+    }
+
+    final cs     = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Einsatzkleidung anlegen'),
+      ),
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+              _sectionCard(
+                icon: Icons.nfc,
+                title: 'Identifikation',
+                isDark: isDark,
+                cs: cs,
+                child: Column(
+                  children: [
+                    // NFC
+                    _scanTile(
+                      label: 'NFC-Tag',
+                      value: _nfcTag,
+                      icon: Icons.nfc,
+                      required: true,
+                      onScan: _scanNfc,
+                      onClear: () => setState(() => _nfcTag = ''),
+                      isDark: isDark,
+                      cs: cs,
+                    ),
+                    const SizedBox(height: 10),
+                    // Barcode
+                    _scanTile(
+                      label: 'Barcode (optional)',
+                      value: _barcode,
+                      icon: Icons.qr_code,
+                      required: false,
+                      onScan: _scanBarcode,
+                      onClear: () => setState(() => _barcode = ''),
+                      isDark: isDark,
+                      cs: cs,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: TextStyle(
-                  color: Colors.grey.shade600,
-                  fontSize: 12,
+              const SizedBox(height: 14),
+
+              _sectionCard(
+                icon: Icons.inventory_2_outlined,
+                title: 'Artikel',
+                isDark: isDark,
+                cs: cs,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Artikel-Suche / Auswahl
+                    _buildArticlePicker(cs, isDark),
+                    const SizedBox(height: 14),
+                    // Typ (wird auto gesetzt, aber manuell änderbar)
+                    _label('Typ'),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: ['Jacke', 'Hose'].map((t) {
+                        final sel = _type == t;
+                        return Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                                right: t == 'Jacke' ? 8 : 0),
+                            child: GestureDetector(
+                              onTap: () => setState(() => _type = t),
+                              child: AnimatedContainer(
+                                duration:
+                                    const Duration(milliseconds: 150),
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: sel
+                                      ? cs.primaryContainer
+                                      : (isDark
+                                          ? cs.surfaceContainerHigh
+                                          : Colors.grey.shade100),
+                                  borderRadius:
+                                      BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: sel
+                                        ? cs.primary
+                                        : Colors.transparent,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      t == 'Jacke'
+                                          ? Icons.accessibility_new
+                                          : Icons
+                                              .airline_seat_legroom_normal,
+                                      size: 18,
+                                      color: sel
+                                          ? cs.primary
+                                          : cs.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(t,
+                                        style: TextStyle(
+                                          fontWeight: sel
+                                              ? FontWeight.w700
+                                              : FontWeight.normal,
+                                          color: sel
+                                              ? cs.primary
+                                              : cs.onSurfaceVariant,
+                                        )),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    // Größe
+                    _label('Größe'),
+                    const SizedBox(height: 6),
+                    _buildSizePicker(cs, isDark),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              _sectionCard(
+                icon: Icons.person_outline,
+                title: 'Zuweisung',
+                isDark: isDark,
+                cs: cs,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Ortswehr
+                    _label('Ortswehr'),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String>(
+                      value: _fireStation,
+                      decoration: _inputDeco(
+                          'Ortswehr wählen',
+                          Icons.local_fire_department_outlined,
+                          cs),
+                      isExpanded: true,
+                      items: FireStations.all
+                          .map((s) => DropdownMenuItem(
+                              value: s, child: Text(s)))
+                          .toList(),
+                      onChanged: _isAdmin
+                          ? (v) =>
+                              setState(() => _fireStation = v ?? _fireStation)
+                          : null,
+                    ),
+                    if (!_isAdmin)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Ortswehr wird automatisch auf deine eigene gesetzt.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                    const SizedBox(height: 14),
+                    // Besitzer
+                    _label('Besitzer'),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: _ownerController,
+                      decoration: _inputDeco(
+                          'Vor- und Nachname', Icons.person, cs),
+                      textCapitalization:
+                          TextCapitalization.words,
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty)
+                              ? 'Besitzer angeben'
+                              : null,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              _sectionCard(
+                icon: Icons.fact_check_outlined,
+                title: 'Prüfung & Status',
+                isDark: isDark,
+                cs: cs,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Prüfdatum
+                    _label('Nächstes Prüfdatum'),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: _pickCheckDate,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? cs.surfaceContainerHigh
+                              : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: cs.outlineVariant, width: 1),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_today,
+                                size: 18, color: cs.primary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                DateFormat('dd.MM.yyyy')
+                                    .format(_checkDate),
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: cs.onSurface,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              _checkDateHint(),
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: cs.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline,
+                            size: 13,
+                            color: cs.onSurfaceVariant),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Erstprüfung wird automatisch heute angelegt.',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Status
+                    _label('Anfangsstatus'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: EquipmentStatus.values.map((s) {
+                        final sel = _status == s;
+                        final color =
+                            EquipmentStatus.getStatusColor(s);
+                        return GestureDetector(
+                          onTap: () => setState(() => _status = s),
+                          child: AnimatedContainer(
+                            duration:
+                                const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: sel
+                                  ? color.withOpacity(
+                                      isDark ? 0.25 : 0.12)
+                                  : (isDark
+                                      ? cs.surfaceContainerHigh
+                                      : Colors.grey.shade100),
+                              borderRadius:
+                                  BorderRadius.circular(20),
+                              border: Border.all(
+                                color: sel
+                                    ? color
+                                    : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                    EquipmentStatus.getStatusIcon(
+                                        s),
+                                    size: 15,
+                                    color: sel
+                                        ? color
+                                        : cs.onSurfaceVariant),
+                                const SizedBox(width: 6),
+                                Text(s,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: sel
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                      color: sel
+                                          ? color
+                                          : cs.onSurfaceVariant,
+                                    )),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Speichern-Button
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _save,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    elevation: 2,
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white))
+                      : const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.save_outlined, size: 20),
+                            SizedBox(width: 10),
+                            Text('Einsatzkleidung anlegen',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+
+  // ── Größen-Picker ─────────────────────────────────────────────────────────
+
+  Widget _buildSizePicker(ColorScheme cs, bool isDark) {
+    final hasValue = _sizeController.text.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Ausgewählte Größe oder Suchfeld
+        if (!_sizePickerOpen && hasValue)
+          _selectedSizeTile(cs, isDark)
+        else
+          _sizeSearchField(cs, isDark),
+
+        // Ergebnisliste (nur wenn Picker offen)
+        if (_sizePickerOpen) ...[
+          const SizedBox(height: 4),
+          Container(
+            decoration: BoxDecoration(
+              color: isDark ? cs.surfaceContainer : Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cs.outlineVariant),
+              boxShadow: isDark
+                  ? []
+                  : [
+                      BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3))
+                    ],
+            ),
+            constraints: const BoxConstraints(maxHeight: 220),
+            child: _filteredSizes.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Größe nicht in der Liste?',
+                            style: TextStyle(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _sizeController.text =
+                                    _sizeSearchController.text.trim();
+                                _sizePickerOpen = false;
+                                _sizeSearchController.clear();
+                              });
+                            },
+                            icon: const Icon(Icons.add, size: 16),
+                            label: Text(
+                                '"${_sizeSearchController.text.trim()}" übernehmen'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _filteredSizes.length,
+                    itemBuilder: (context, i) {
+                      final size = _filteredSizes[i];
+                      final parts = size.split(' ');
+                      final base   = parts[0];
+                      final suffix = parts.length > 1 ? parts[1] : '';
+                      final isLast = i == _filteredSizes.length - 1;
+
+                      return Column(
+                        children: [
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                _sizeController.text = size;
+                                _sizePickerOpen = false;
+                                _sizeSearchController.clear();
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 11),
+                              child: Row(
+                                children: [
+                                  Text(base,
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: cs.onSurface,
+                                          fontFamily: 'monospace')),
+                                  if (suffix.isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: cs.primaryContainer,
+                                        borderRadius:
+                                            BorderRadius.circular(5),
+                                      ),
+                                      child: Text(suffix,
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: cs.primary)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (!isLast)
+                            Divider(
+                                height: 1,
+                                indent: 16,
+                                color: cs.outlineVariant.withOpacity(0.35)),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
       ],
     );
   }
+
+  Widget _selectedSizeTile(ColorScheme cs, bool isDark) {
+    final parts  = _sizeController.text.split(' ');
+    final base   = parts[0];
+    final suffix = parts.length > 1 ? parts[1] : '';
+
+    return InkWell(
+      onTap: () => setState(() => _sizePickerOpen = true),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? cs.surfaceContainerHigh : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border:
+              Border.all(color: cs.primary.withOpacity(0.4), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.straighten, size: 18),
+            const SizedBox(width: 10),
+            Text(base,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurface,
+                    fontFamily: 'monospace')),
+            if (suffix.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(suffix,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: cs.primary)),
+              ),
+            ],
+            const Spacer(),
+            Icon(Icons.edit_outlined,
+                size: 16, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sizeSearchField(ColorScheme cs, bool isDark) {
+    return FormField<String>(
+      validator: (_) => EquipmentData.validateSize(_sizeController.text),
+      builder: (state) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: _sizeSearchController,
+            autofocus: _sizePickerOpen,
+            keyboardType: TextInputType.text,
+            decoration: InputDecoration(
+              hintText: 'Größe suchen, z.B. 54 oder K…',
+              prefixIcon: const Icon(Icons.straighten, size: 20),
+              suffixIcon: _sizeSearchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _sizeSearchController.clear();
+                        setState(() {});
+                      },
+                    )
+                  : null,
+              errorText: state.errorText,
+              filled: true,
+              fillColor: isDark
+                  ? cs.surfaceContainerHigh
+                  : Colors.grey.shade50,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: cs.outlineVariant)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: cs.outlineVariant)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide:
+                      BorderSide(color: cs.primary, width: 2)),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 12),
+            ),
+            onTap: () => setState(() => _sizePickerOpen = true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Artikel-Picker ────────────────────────────────────────────────────────
+
+  Widget _buildArticlePicker(ColorScheme cs, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('Artikel'),
+        const SizedBox(height: 6),
+
+        // Ausgewählter Artikel oder Suchfeld
+        if (!_articleSearchOpen && _article.isNotEmpty)
+          _selectedArticleTile(cs, isDark)
+        else
+          _articleSearchField(cs, isDark),
+
+        // Ergebnisliste (nur wenn Suche offen)
+        if (_articleSearchOpen) ...[
+          const SizedBox(height: 4),
+          Container(
+            decoration: BoxDecoration(
+              color: isDark ? cs.surfaceContainer : Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cs.outlineVariant),
+              boxShadow: isDark
+                  ? []
+                  : [
+                      BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3))
+                    ],
+            ),
+            child: _filteredArticles.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text('Kein Artikel gefunden',
+                        style:
+                            TextStyle(color: cs.onSurfaceVariant)),
+                  )
+                : Column(
+                    children:
+                        _filteredArticles.asMap().entries.map((e) {
+                      final idx     = e.key;
+                      final article = e.value;
+                      final isLast  =
+                          idx == _filteredArticles.length - 1;
+                      return Column(
+                        children: [
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                _article = article['name']!;
+                                _type    = article['type']!;
+                                _articleSearchOpen = false;
+                                _articleSearchController.clear();
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 12),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      color: article['type'] ==
+                                              'Jacke'
+                                          ? (isDark
+                                              ? const Color(
+                                                  0xFF1A3A5C)
+                                              : const Color(
+                                                  0xFFDBEAFB))
+                                          : (isDark
+                                              ? const Color(
+                                                  0xFF4D3000)
+                                              : const Color(
+                                                  0xFFFFF0CC)),
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      article['type'] == 'Jacke'
+                                          ? Icons.accessibility_new
+                                          : Icons
+                                              .airline_seat_legroom_normal,
+                                      size: 16,
+                                      color: article['type'] ==
+                                              'Jacke'
+                                          ? (isDark
+                                              ? const Color(
+                                                  0xFF90CAF9)
+                                              : const Color(
+                                                  0xFF1565C0))
+                                          : (isDark
+                                              ? const Color(
+                                                  0xFFFFCC02)
+                                              : const Color(
+                                                  0xFFE65100)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(article['name']!,
+                                            style: const TextStyle(
+                                                fontSize: 13,
+                                                fontWeight:
+                                                    FontWeight.w500)),
+                                        Text(article['type']!,
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: cs
+                                                    .onSurfaceVariant)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (!isLast)
+                            Divider(
+                                height: 1,
+                                indent: 58,
+                                color: cs.outlineVariant
+                                    .withOpacity(0.4)),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _selectedArticleTile(ColorScheme cs, bool isDark) {
+    final isJacke = _type == 'Jacke';
+    final iconBg  = isJacke
+        ? (isDark ? const Color(0xFF1A3A5C) : const Color(0xFFDBEAFB))
+        : (isDark ? const Color(0xFF4D3000) : const Color(0xFFFFF0CC));
+    final iconFg  = isJacke
+        ? (isDark ? const Color(0xFF90CAF9) : const Color(0xFF1565C0))
+        : (isDark ? const Color(0xFFFFCC02) : const Color(0xFFE65100));
+
+    return InkWell(
+      onTap: () => setState(() => _articleSearchOpen = true),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? cs.surfaceContainerHigh : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.primary.withOpacity(0.4), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(8)),
+              child: Icon(
+                isJacke
+                    ? Icons.accessibility_new
+                    : Icons.airline_seat_legroom_normal,
+                color: iconFg,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_article,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurface)),
+                  Text(_type,
+                      style: TextStyle(
+                          fontSize: 11, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            Icon(Icons.edit_outlined,
+                size: 16, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _articleSearchField(ColorScheme cs, bool isDark) {
+    return TextFormField(
+      controller: _articleSearchController,
+      autofocus: _articleSearchOpen,
+      decoration: InputDecoration(
+        hintText: 'Artikel suchen…',
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: _articleSearchController.text.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear, size: 18),
+                onPressed: () {
+                  _articleSearchController.clear();
+                  setState(() {});
+                },
+              )
+            : null,
+        filled: true,
+        fillColor:
+            isDark ? cs.surfaceContainerHigh : Colors.grey.shade50,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.outlineVariant)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.outlineVariant)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.primary, width: 2)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+      onTap: () => setState(() => _articleSearchOpen = true),
+      validator: (_) => _article.isEmpty ? 'Artikel wählen' : null,
+    );
+  }
+
+  // ── Prüfdatum ─────────────────────────────────────────────────────────────
+
+  Future<void> _pickCheckDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _checkDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+    );
+    if (picked != null) setState(() => _checkDate = picked);
+  }
+
+  String _checkDateHint() {
+    final days = _checkDate.difference(DateTime.now()).inDays;
+    if (days >= 365) return 'in ${(days / 365).toStringAsFixed(1)} J.';
+    return 'in $days Tagen';
+  }
+
+  // ── Hilfsmethoden ─────────────────────────────────────────────────────────
+
+  Widget _sectionCard({
+    required IconData icon,
+    required String title,
+    required Widget child,
+    required bool isDark,
+    required ColorScheme cs,
+  }) {
+    return Material(
+      color: isDark ? cs.surfaceContainer : Colors.white,
+      elevation: isDark ? 0 : 2,
+      shadowColor: cs.shadow.withOpacity(0.07),
+      clipBehavior: Clip.hardEdge,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: isDark
+            ? BorderSide(color: cs.outlineVariant, width: 1)
+            : BorderSide.none,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: cs.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, size: 16, color: cs.primary),
+                ),
+                const SizedBox(width: 10),
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _scanTile({
+    required String label,
+    required String value,
+    required IconData icon,
+    required bool required,
+    required VoidCallback onScan,
+    required VoidCallback onClear,
+    required bool isDark,
+    required ColorScheme cs,
+  }) {
+    final hasValue = value.isNotEmpty;
+    final Color borderColor = hasValue
+        ? Colors.green
+        : required
+            ? cs.outlineVariant
+            : cs.outlineVariant.withOpacity(0.5);
+    final Color bgColor = hasValue
+        ? Colors.green.withOpacity(isDark ? 0.12 : 0.06)
+        : (isDark ? cs.surfaceContainerHigh : Colors.grey.shade50);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor, width: hasValue ? 1.5 : 1),
+      ),
+      child: Row(
+        children: [
+          Icon(icon,
+              size: 20,
+              color: hasValue ? Colors.green : cs.onSurfaceVariant),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 12, color: cs.onSurfaceVariant)),
+                const SizedBox(height: 2),
+                Text(
+                  hasValue ? value : 'Noch nicht gescannt',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        hasValue ? FontWeight.w600 : FontWeight.normal,
+                    color: hasValue
+                        ? cs.onSurface
+                        : cs.onSurfaceVariant.withOpacity(0.6),
+                    fontFamily: hasValue ? 'monospace' : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (hasValue)
+            IconButton(
+              icon: Icon(Icons.close, size: 18, color: cs.onSurfaceVariant),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: onClear,
+            )
+          else
+            TextButton.icon(
+              onPressed: onScan,
+              icon: Icon(icon, size: 16),
+              label: const Text('Scan'),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(text,
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600));
+
+  InputDecoration _inputDeco(
+          String hint, IconData icon, ColorScheme cs) =>
+      InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, size: 20),
+        filled: true,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.outlineVariant)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.outlineVariant)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: cs.primary, width: 2)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      );
 }
