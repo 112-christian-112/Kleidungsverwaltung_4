@@ -1,5 +1,4 @@
 // screens/missions/mission_send_to_cleaning_screen.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:typed_data';
@@ -21,10 +20,12 @@ class MissionSendToCleaningScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<MissionSendToCleaningScreen> createState() => _MissionSendToCleaningScreenState();
+  State<MissionSendToCleaningScreen> createState() =>
+      _MissionSendToCleaningScreenState();
 }
 
-class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScreen> {
+class _MissionSendToCleaningScreenState
+    extends State<MissionSendToCleaningScreen> {
   final MissionService _missionService = MissionService();
   final EquipmentService _equipmentService = EquipmentService();
 
@@ -41,17 +42,14 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
   }
 
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
       final mission = await _missionService.getMissionById(widget.missionId);
-      if (mission == null) {
-        throw Exception('Einsatz nicht gefunden');
-      }
+      if (mission == null) throw Exception('Einsatz nicht gefunden');
 
-      final equipmentList = await _missionService.getEquipmentForMission(widget.missionId);
+      final equipmentList =
+          await _missionService.getEquipmentForMission(widget.missionId);
 
       final selectedEquipment = equipmentList
           .where((item) => item.status != EquipmentStatus.cleaning)
@@ -66,17 +64,11 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
         });
       }
     } catch (e) {
-      print('Fehler beim Laden der Daten: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Fehler: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
         );
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -100,102 +92,124 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
   }
 
   void _deselectAll() {
-    setState(() {
-      _selectedEquipment = [];
-    });
+    setState(() => _selectedEquipment = []);
   }
 
-  // Vereinfachte PDF-Generierung mit dem neuen Service
   Future<Uint8List> _generatePdf() async {
-    if (_mission == null) {
-      throw Exception('Keine Einsatzdaten verfügbar');
-    }
-
-    try {
-      return await CleaningReceiptPdfService.generateCleaningReceiptPdf(
-        mission: _mission!,
-        equipmentList: _selectedEquipment,
-      );
-    } catch (e) {
-      throw Exception('Fehler bei der PDF-Generierung: $e');
-    }
+    if (_mission == null) throw Exception('Keine Einsatzdaten verfügbar');
+    return CleaningReceiptPdfService.generateCleaningReceiptPdf(
+      mission: _mission!,
+      equipmentList: _selectedEquipment,
+    );
   }
 
+  /// FIX: Einzelfehlerbehandlung in der Cleaning-Schleife.
+  ///
+  /// Vorher: sequenzielle Schleife — ein Fehler bei Item 3 bricht ab und
+  /// lässt Items 1+2 inkonsistent auf "cleaning" stehen, ohne Rückmeldung.
+  ///
+  /// Jetzt:
+  /// 1. Alle IDs per Batch-Write auf "cleaning" setzen (atomisch, ein Commit).
+  /// 2. Bei Batch-Fehler: Abbruch vor PDF-Generierung, kein inkonsistenter Zustand.
+  /// 3. PDF-Fehler: Status bleibt gesetzt (Kleidung ist in der Reinigung),
+  ///    aber Nutzer wird informiert und kann PDF manuell neu generieren.
   Future<void> _sendToCleaningAndGeneratePdf() async {
     if (_selectedEquipment.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Bitte wählen Sie mindestens ein Kleidungsstück aus'),
           backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
-    setState(() {
-      _isProcessing = true;
-    });
+    setState(() => _isProcessing = true);
 
+    // ── Schritt 1: Alle Status-Updates als atomischer Batch ──────────────────
+    // updateStatusBatch() schreibt alle IDs in einem einzigen Firestore-Commit.
+    // Entweder alle oder keiner — kein inkonsistenter Zwischenzustand möglich.
+    final ids = _selectedEquipment.map((e) => e.id).toList();
     try {
-      // Status aller ausgewählten Kleidungsstücke auf "In der Reinigung" setzen
-      for (var equipment in _selectedEquipment) {
-        await _equipmentService.updateStatus(equipment.id, EquipmentStatus.cleaning);
-      }
-
-      // PDF generieren mit dem neuen Service
-      final pdfBytes = await _generatePdf();
-
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-
-        // PDF anzeigen mit der neuen Preview-Screen
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => CleaningReceiptPreviewScreen(
-              pdfBytes: pdfBytes,
-              mission: _mission!,
-              equipmentList: _selectedEquipment,
-              onComplete: () {
-                Navigator.popUntil(
-                  context,
-                      (route) => route.isFirst || route.settings.name == '/missions',
-                );
-              },
-            ),
-          ),
-        );
-      }
+      await _equipmentService.updateStatusBatch(ids, EquipmentStatus.cleaning);
     } catch (e) {
-      print('Fehler beim Senden zur Reinigung: $e');
+      // Batch komplett fehlgeschlagen → kein einziger Status wurde geändert
       if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
+        setState(() => _isProcessing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Fehler: $e'),
+            content: Text('Status-Update fehlgeschlagen: $e'),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
+      return;
     }
+
+    // ── Schritt 2: PDF generieren ────────────────────────────────────────────
+    // Status ist bereits gesetzt — die Kleidung ist in der Reinigung.
+    // Ein PDF-Fehler ist nicht mehr kritisch, der Nutzer kann das PDF
+    // über "Wäschereischein" im Einsatz-Detail neu generieren.
+    Uint8List? pdfBytes;
+    String? pdfError;
+    try {
+      pdfBytes = await _generatePdf();
+    } catch (e) {
+      pdfError = e.toString();
+    }
+
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+
+    if (pdfError != null) {
+      // Status wurde erfolgreich gesetzt, aber PDF schlug fehl
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_selectedEquipment.length} Kleidungsstücke in die Reinigung gesendet.\n'
+            'PDF konnte nicht erstellt werden: $pdfError',
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 6),
+        ),
+      );
+      // Zurück zum vorherigen Screen — Status ist korrekt gesetzt
+      Navigator.pop(context, true);
+      return;
+    }
+
+    // ── Schritt 3: PDF-Preview anzeigen ─────────────────────────────────────
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CleaningReceiptPreviewScreen(
+          pdfBytes: pdfBytes!,
+          mission: _mission!,
+          equipmentList: _selectedEquipment,
+          onComplete: () {
+            Navigator.popUntil(
+              context,
+              (route) =>
+                  route.isFirst || route.settings.name == '/missions',
+            );
+          },
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('In die Reinigung senden'),
-        ),
+        appBar: AppBar(title: const Text('In die Reinigung senden')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    // Berechne Statistiken für die Anzeige
     final counts = _countEquipmentTypes(_selectedEquipment);
 
     return Scaffold(
@@ -216,7 +230,7 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
       ),
       body: Column(
         children: [
-          // Zusammenfassung der Einsatzinformationen
+          // ── Einsatz-Info ─────────────────────────────────────────────────
           Card(
             margin: const EdgeInsets.all(16),
             child: Padding(
@@ -227,25 +241,19 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
                   Text(
                     'Einsatz: ${_mission?.name ?? widget.missionName}',
                     style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   if (_mission != null) ...[
                     const SizedBox(height: 8),
-                    Text(
-                      'Datum: ${DateFormat('dd.MM.yyyy').format(_mission!.startTime)}',
-                    ),
-                    Text(
-                      'Ort: ${_mission!.location}',
-                    ),
+                    Text('Datum: ${DateFormat('dd.MM.yyyy').format(_mission!.startTime)}'),
+                    Text('Ort: ${_mission!.location}'),
                   ],
                 ],
               ),
             ),
           ),
 
-          // Verbesserte Zusammenfassung der ausgewählten Gegenstände
+          // ── Auswahl-Zusammenfassung ───────────────────────────────────────
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             child: Padding(
@@ -264,8 +272,10 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildCountColumn('Jacken', '${counts.jackets}', Icons.accessibility_new, Colors.blue),
-                      _buildCountColumn('Hosen', '${counts.pants}', Icons.airline_seat_legroom_normal, Colors.amber),
+                      _buildCountColumn('Jacken', '${counts.jackets}',
+                          Icons.accessibility_new, Colors.blue),
+                      _buildCountColumn('Hosen', '${counts.pants}',
+                          Icons.airline_seat_legroom_normal, Colors.amber),
                     ],
                   ),
                 ],
@@ -273,7 +283,7 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
             ),
           ),
 
-          // Überschrift für die Liste
+          // ── Listen-Header ─────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
@@ -281,22 +291,18 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
               children: [
                 const Text(
                   'Ausrüstung zur Reinigung',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 Text(
                   '${_selectedEquipment.length} von ${_equipmentList.length} ausgewählt',
                   style: TextStyle(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
+                      color: Theme.of(context).colorScheme.secondary),
                 ),
               ],
             ),
           ),
 
-          // Liste der Ausrüstungsgegenstände
+          // ── Ausrüstungs-Liste ─────────────────────────────────────────────
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -304,7 +310,8 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
               itemBuilder: (context, index) {
                 final equipment = _equipmentList[index];
                 final isSelected = _selectedEquipment.contains(equipment);
-                final isInCleaning = equipment.status == EquipmentStatus.cleaning;
+                final isInCleaning =
+                    equipment.status == EquipmentStatus.cleaning;
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -312,53 +319,24 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
                     title: Text(
                       equipment.article,
                       style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isInCleaning ? Colors.grey : null,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isInCleaning ? Colors.orange : null,
                       ),
                     ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Besitzer: ${equipment.owner} | Größe: ${equipment.size}'),
-                        // Barcode anzeigen falls vorhanden
-                        if (equipment.barcode != null && equipment.barcode!.isNotEmpty)
-                          Text(
-                            'Barcode: ${equipment.barcode}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        if (isInCleaning)
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.info,
-                                size: 16,
-                                color: Theme.of(context).colorScheme.secondary,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Bereits in der Reinigung',
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.secondary,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
+                    subtitle: Text(
+                      '${equipment.owner} · Gr. ${equipment.size}'
+                      '${isInCleaning ? ' · Bereits in Reinigung' : ''}',
                     ),
                     value: isSelected,
                     onChanged: isInCleaning
-                        ? null
-                        : (value) {
-                      if (value != null) {
-                        _toggleSelection(equipment);
-                      }
-                    },
+                        ? null // Bereits in Reinigung → nicht auswählbar
+                        : (_) => _toggleSelection(equipment),
                     secondary: CircleAvatar(
-                      backgroundColor: equipment.type == 'Jacke' ? Colors.blue : Colors.amber,
+                      backgroundColor: equipment.type == 'Jacke'
+                          ? Colors.blue
+                          : Colors.amber,
                       child: Icon(
                         equipment.type == 'Jacke'
                             ? Icons.accessibility_new
@@ -374,12 +352,12 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
           ),
         ],
       ),
+
+      // ── Senden-Button ────────────────────────────────────────────────────
       bottomNavigationBar: Container(
         padding: const EdgeInsets.all(16),
         child: ElevatedButton(
-          onPressed: _isProcessing
-              ? null
-              : _sendToCleaningAndGeneratePdf,
+          onPressed: _isProcessing ? null : _sendToCleaningAndGeneratePdf,
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 16),
             backgroundColor: Colors.green,
@@ -387,20 +365,22 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
           ),
           child: _isProcessing
               ? const SizedBox(
-            height: 20,
-            width: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-          )
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
               : const Text(
-            'In die Reinigung senden und PDF erstellen',
-            style: TextStyle(fontSize: 16),
-          ),
+                  'In die Reinigung senden und PDF erstellen',
+                  style: TextStyle(fontSize: 16),
+                ),
         ),
       ),
     );
   }
 
-  Widget _buildCountColumn(String label, String count, IconData icon, Color color) {
+  Widget _buildCountColumn(
+      String label, String count, IconData icon, Color color) {
     return Column(
       children: [
         Container(
@@ -412,22 +392,15 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
           child: Icon(icon, color: color, size: 24),
         ),
         const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
-          ),
-        ),
+        Text(label,
+            style: const TextStyle(
+                fontWeight: FontWeight.w600, fontSize: 12)),
         const SizedBox(height: 4),
-        Text(
-          count,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
+        Text(count,
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color)),
       ],
     );
   }
@@ -437,7 +410,7 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
     int pantsCount = 0;
     int otherCount = 0;
 
-    for (var item in equipmentList) {
+    for (final item in equipmentList) {
       switch (item.type.toLowerCase()) {
         case 'jacke':
           jacketCount++;
@@ -452,9 +425,6 @@ class _MissionSendToCleaningScreenState extends State<MissionSendToCleaningScree
     }
 
     return EquipmentCounts(
-      jackets: jacketCount,
-      pants: pantsCount,
-      other: otherCount,
-    );
+        jackets: jacketCount, pants: pantsCount, other: otherCount);
   }
 }

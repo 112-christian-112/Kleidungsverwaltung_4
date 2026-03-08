@@ -12,12 +12,13 @@ class MissionService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final PermissionService _permissionService = PermissionService();
 
-// Einsätze basierend auf UserModel-Permissions laden.
+  // ── Lese-Methoden ─────────────────────────────────────────────────────────
+
+  /// Einsätze basierend auf UserModel-Permissions laden.
   /// Akzeptiert nullable UserModel — bei null wird der alte PermissionService
   /// als Fallback genutzt (Rückwärtskompatibilität).
   Stream<List<MissionModel>> getMissionsForCurrentUser([UserModel? user]) async* {
     try {
-      // Fallback: kein UserModel übergeben → alten Weg nutzen
       if (user == null) {
         final canViewAll = await _permissionService.canViewAllMissions();
         if (canViewAll) {
@@ -28,51 +29,44 @@ class MissionService {
         return;
       }
 
-      // Kein Leserecht → leer
       if (!user.isAdmin && user.permissions.missionView != true) {
         yield [];
         return;
       }
 
-      // Admin oder Wildcard → alle Einsätze
       if (user.isAdmin ||
           user.permissions.visibleFireStations.contains('*')) {
         yield* getAllMissions();
         return;
       }
 
-      // Sichtbare Stationen (eigene + freigegebene)
       final stations = <String>{user.fireStation};
       stations.addAll(user.permissions.visibleFireStations);
 
-      // Client-seitiger Filter (kein arrayContainsAny-Limit-Problem)
       yield* _firestore
           .collection('missions')
           .orderBy('startTime', descending: true)
           .snapshots()
           .map((snap) => snap.docs
-          .map((d) => MissionModel.fromMap(d.data(), d.id))
-          .where((m) =>
-      stations.contains(m.fireStation) ||
-          m.involvedFireStations.any((s) => stations.contains(s)))
-          .toList());
+              .map((d) => MissionModel.fromMap(d.data(), d.id))
+              .where((m) =>
+                  stations.contains(m.fireStation) ||
+                  m.involvedFireStations.any((s) => stations.contains(s)))
+              .toList());
     } catch (e) {
       print('Fehler getMissionsForCurrentUser: $e');
       yield [];
     }
   }
 
-  // Bestehende Methoden bleiben erhalten
   Stream<List<MissionModel>> getAllMissions() {
     return _firestore
         .collection('missions')
         .orderBy('startTime', descending: true)
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        return MissionModel.fromMap(doc.data(), doc.id);
-      }).toList();
-    });
+        .map((snapshot) => snapshot.docs
+            .map((doc) => MissionModel.fromMap(doc.data(), doc.id))
+            .toList());
   }
 
   Stream<List<MissionModel>> getMissionsForUserFireStation() async* {
@@ -82,103 +76,104 @@ class MissionService {
         yield [];
         return;
       }
-
-      // Einsätze abrufen, bei denen die Benutzer-Feuerwehr beteiligt ist
       yield* _firestore
           .collection('missions')
           .where('involvedFireStations', arrayContains: userFireStation)
           .orderBy('startTime', descending: true)
           .snapshots()
-          .map((snapshot) {
-        return snapshot.docs.map((doc) {
-          return MissionModel.fromMap(doc.data(), doc.id);
-        }).toList();
-      });
+          .map((snapshot) => snapshot.docs
+              .map((doc) => MissionModel.fromMap(doc.data(), doc.id))
+              .toList());
     } catch (e) {
       print('Fehler beim Abrufen der Einsätze für Benutzerfeuerwehr: $e');
       yield [];
     }
   }
 
-  // Methoden mit Berechtigungsprüfung für Schreiboperationen
-  Future<DocumentReference> createMission(MissionModel mission) async {
-    // Normale Benutzer und Admins können Einsätze erstellen
-    final canCreate = await _permissionService.canPerformAction('add_missions');
-    if (!canCreate) {
-      throw Exception('Keine Berechtigung zum Erstellen von Einsätzen');
-    }
-
-    User? currentUser = _auth.currentUser;
-    if (currentUser == null) {
-      throw Exception('Kein Benutzer angemeldet');
-    }
-
-    final missionData = mission.toMap();
-    return await _firestore.collection('missions').add(missionData);
+  Stream<List<MissionModel>> getMissionsByFireStation(String fireStation) {
+    return _firestore
+        .collection('missions')
+        .orderBy('startTime', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) =>
+                MissionModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+            .where((mission) =>
+                mission.fireStation == fireStation ||
+                mission.involvedFireStations.contains(fireStation))
+            .toList());
   }
 
-  Future<void> updateMission(MissionModel mission) async {
-    // Nur Admins können Einsätze bearbeiten
-    final canEdit = await _permissionService.canEditMissions();
-    if (!canEdit) {
-      throw Exception('Keine Berechtigung zum Bearbeiten von Einsätzen');
+  Stream<List<MissionModel>> getMissionsByFireStations(
+      List<String> fireStations) async* {
+    try {
+      final canViewAll = await _permissionService.canViewAllMissions();
+
+      if (canViewAll && fireStations.contains('Alle')) {
+        yield* getAllMissions();
+        return;
+      }
+
+      if (fireStations.isEmpty) {
+        yield [];
+        return;
+      }
+
+      yield* _firestore
+          .collection('missions')
+          .where('involvedFireStations', arrayContainsAny: fireStations)
+          .orderBy('startTime', descending: true)
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+              .map((doc) => MissionModel.fromMap(doc.data(), doc.id))
+              .toList());
+    } catch (e) {
+      print('Fehler beim Abrufen der Einsätze nach Feuerwehrstationen: $e');
+      yield [];
     }
-
-    User? currentUser = _auth.currentUser;
-    if (currentUser == null) {
-      throw Exception('Kein Benutzer angemeldet');
-    }
-
-    final missionData = mission.toMap();
-    missionData['updatedAt'] = Timestamp.now();
-    missionData['updatedBy'] = currentUser.uid;
-
-    await _firestore.collection('missions').doc(mission.id).update(missionData);
   }
 
-  Future<void> deleteMission(String missionId) async {
-    // Nur Admins können Einsätze löschen
-    final canDelete = await _permissionService.canEditMissions();
-    if (!canDelete) {
-      throw Exception('Keine Berechtigung zum Löschen von Einsätzen');
-    }
+  Stream<List<MissionModel>> getMissionsByDateRange(
+      DateTime startDate, DateTime endDate) async* {
+    try {
+      final canViewAll = await _permissionService.canViewAllMissions();
 
-    await _firestore.collection('missions').doc(missionId).delete();
+      Query query = _firestore
+          .collection('missions')
+          .where('startTime',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+          .orderBy('startTime', descending: true);
+
+      if (!canViewAll) {
+        final userFireStation = await _permissionService.getUserFireStation();
+        if (userFireStation.isEmpty) {
+          yield [];
+          return;
+        }
+        query = query.where('involvedFireStations',
+            arrayContains: userFireStation);
+      }
+
+      yield* query.snapshots().map((snapshot) => snapshot.docs
+          .map((doc) =>
+              MissionModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+          .toList());
+    } catch (e) {
+      print('Fehler beim Abrufen der Einsätze nach Zeitraum: $e');
+      yield [];
+    }
   }
 
-  // Ausrüstung zu Einsatz hinzufügen (normale Benutzer und Admins)
-  Future<void> addEquipmentToMission(String missionId,
-      List<String> equipmentIds) async {
-    final canUpdate = await _permissionService.canPerformAction('add_missions');
-    if (!canUpdate) {
-      throw Exception(
-          'Keine Berechtigung zum Hinzufügen von Ausrüstung zu Einsätzen');
-    }
-
-    User? currentUser = _auth.currentUser;
-    if (currentUser == null) {
-      throw Exception('Kein Benutzer angemeldet');
-    }
-
-    await _firestore.collection('missions').doc(missionId).update({
-      'equipmentIds': FieldValue.arrayUnion(equipmentIds),
-      'updatedAt': Timestamp.now(),
-      'updatedBy': currentUser.uid,
-    });
-  }
-
-  // Lesezugriff-Methoden (für alle mit entsprechenden Berechtigungen verfügbar)
   Future<MissionModel?> getMissionById(String missionId) async {
     try {
-      DocumentSnapshot doc = await _firestore.collection('missions').doc(
-          missionId).get();
-
+      final doc =
+          await _firestore.collection('missions').doc(missionId).get();
       if (!doc.exists) return null;
 
-      final mission = MissionModel.fromMap(
-          doc.data() as Map<String, dynamic>, doc.id);
+      final mission =
+          MissionModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
 
-      // Prüfe Zugriffsberechtigung
       final hasAccess = await hasAccessToMission(mission);
       if (!hasAccess) {
         throw Exception('Keine Berechtigung zum Anzeigen dieses Einsatzes');
@@ -191,17 +186,18 @@ class MissionService {
     }
   }
 
+  /// FIX: whereIn ist auf 10 Einträge begrenzt.
+  /// Diese Methode lädt Equipment-IDs in Batches à 10,
+  /// damit Einsätze mit mehr als 10 Kleidungsstücken korrekt geladen werden.
   Future<List<EquipmentModel>> getEquipmentForMission(String missionId) async {
     try {
-      DocumentSnapshot missionDoc = await _firestore.collection('missions').doc(
-          missionId).get();
-
+      final missionDoc =
+          await _firestore.collection('missions').doc(missionId).get();
       if (!missionDoc.exists) return [];
 
       final mission = MissionModel.fromMap(
           missionDoc.data() as Map<String, dynamic>, missionDoc.id);
 
-      // Prüfe Zugriffsberechtigung
       final hasAccess = await hasAccessToMission(mission);
       if (!hasAccess) {
         throw Exception(
@@ -210,40 +206,47 @@ class MissionService {
 
       if (mission.equipmentIds.isEmpty) return [];
 
-      QuerySnapshot equipmentQuery = await _firestore
-          .collection('equipment')
-          .where(FieldPath.documentId, whereIn: mission.equipmentIds)
-          .get();
+      final ids = mission.equipmentIds;
+      const int batchSize = 10; // Firestore whereIn-Limit
+      final List<EquipmentModel> allEquipment = [];
 
-      return equipmentQuery.docs.map((doc) {
-        return EquipmentModel.fromMap(
-            doc.data() as Map<String, dynamic>, doc.id);
-      }).toList();
+      for (int i = 0; i < ids.length; i += batchSize) {
+        final end =
+            (i + batchSize < ids.length) ? i + batchSize : ids.length;
+        final batch = ids.sublist(i, end);
+
+        final snapshot = await _firestore
+            .collection('equipment')
+            .where(FieldPath.documentId, whereIn: batch)
+            .get();
+
+        allEquipment.addAll(snapshot.docs.map((doc) =>
+            EquipmentModel.fromMap(
+                doc.data() as Map<String, dynamic>, doc.id)));
+      }
+
+      return allEquipment;
     } catch (e) {
       print('Fehler beim Abrufen der Ausrüstung für Einsatz: $e');
       return [];
     }
   }
 
-  Future<List<MissionModel>> getMissionsForEquipment(String equipmentId) async {
+  Future<List<MissionModel>> getMissionsForEquipment(
+      String equipmentId) async {
     try {
-      QuerySnapshot querySnapshot = await _firestore
+      final querySnapshot = await _firestore
           .collection('missions')
           .where('equipmentIds', arrayContains: equipmentId)
           .orderBy('startTime', descending: true)
           .get();
 
-      List<MissionModel> missions = [];
-
-      for (var doc in querySnapshot.docs) {
-        final mission = MissionModel.fromMap(
-            doc.data() as Map<String, dynamic>, doc.id);
-
-        // Prüfe Zugriffsberechtigung für jeden Einsatz
+      final missions = <MissionModel>[];
+      for (final doc in querySnapshot.docs) {
+        final mission =
+            MissionModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
         final hasAccess = await hasAccessToMission(mission);
-        if (hasAccess) {
-          missions.add(mission);
-        }
+        if (hasAccess) missions.add(mission);
       }
 
       return missions;
@@ -253,15 +256,11 @@ class MissionService {
     }
   }
 
-  // NEUE METHODE: Prüft ob Benutzer Zugriff auf bestimmten Einsatz hat
   Future<bool> hasAccessToMission(MissionModel mission) async {
     try {
       final canViewAll = await _permissionService.canViewAllMissions();
-      if (canViewAll) {
-        return true; // Admin und Hygieneeinheit haben Zugriff auf alle Einsätze
-      }
+      if (canViewAll) return true;
 
-      // Normale Benutzer: Prüfe ob ihre Feuerwehr beteiligt ist
       final userFireStation = await _permissionService.getUserFireStation();
       if (userFireStation.isEmpty) return false;
 
@@ -273,172 +272,43 @@ class MissionService {
     }
   }
 
-  // NEUE METHODE: Berechtigungsbasierte Einsatzabfrage nach Feuerwehrstationen
-  Stream<List<MissionModel>> getMissionsByFireStations(
-      List<String> fireStations) async* {
+  Future<bool> canEditMission(MissionModel mission) async {
     try {
-      final canViewAll = await _permissionService.canViewAllMissions();
-
-      if (canViewAll && fireStations.contains('Alle')) {
-        // Admin/Hygieneeinheit kann alle Einsätze sehen
-        yield* getAllMissions();
-        return;
-      }
-
-      if (fireStations.isEmpty) {
-        yield [];
-        return;
-      }
-
-      // Einsätze abrufen, bei denen eine der angegebenen Feuerwehren beteiligt ist
-      yield* _firestore
-          .collection('missions')
-          .where('involvedFireStations', arrayContainsAny: fireStations)
-          .orderBy('startTime', descending: true)
-          .snapshots()
-          .map((snapshot) {
-        return snapshot.docs.map((doc) {
-          return MissionModel.fromMap(doc.data(), doc.id);
-        }).toList();
-      });
-    } catch (e) {
-      print('Fehler beim Abrufen der Einsätze nach Feuerwehrstationen: $e');
-      yield [];
-    }
-  }
-
-  // NEUE METHODE: Einsätze nach Zeitraum mit Berechtigungsprüfung
-  Stream<List<MissionModel>> getMissionsByDateRange(DateTime startDate,
-      DateTime endDate) async* {
-    try {
-      final canViewAll = await _permissionService.canViewAllMissions();
-
-      Query query = _firestore
-          .collection('missions')
-          .where(
-          'startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-          .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
-          .orderBy('startTime', descending: true);
-
-      if (!canViewAll) {
-        // Normale Benutzer sehen nur Einsätze ihrer Feuerwehr
-        final userFireStation = await _permissionService.getUserFireStation();
-        if (userFireStation.isNotEmpty) {
-          query = query.where(
-              'involvedFireStations', arrayContains: userFireStation);
-        } else {
-          yield [];
-          return;
-        }
-      }
-
-      yield* query.snapshots().map((snapshot) {
-        return snapshot.docs.map((doc) {
-          return MissionModel.fromMap(
-              doc.data() as Map<String, dynamic>, doc.id);
-        }).toList();
-      });
-    } catch (e) {
-      print('Fehler beim Abrufen der Einsätze nach Zeitraum: $e');
-      yield [];
-    }
-  }
-
-  // NEUE METHODE: Statistiken für autorisierte Benutzer
-  Future<Map<String, dynamic>> getMissionStatistics() async {
-    try {
-      final canViewAll = await _permissionService.canViewAllMissions();
-
-      Query query = _firestore.collection('missions');
-
-      if (!canViewAll) {
-        final userFireStation = await _permissionService.getUserFireStation();
-        if (userFireStation.isEmpty) {
-          return {
-            'total': 0,
-            'byType': <String, int>{},
-            'byMonth': <String, int>{},
-          };
-        }
-        query =
-            query.where('involvedFireStations', arrayContains: userFireStation);
-      }
-
-      QuerySnapshot snapshot = await query.get();
-
-      Map<String, int> byType = {};
-      Map<String, int> byMonth = {};
-
-      for (var doc in snapshot.docs) {
-        final mission = MissionModel.fromMap(
-            doc.data() as Map<String, dynamic>, doc.id);
-
-        // Nach Typ zählen
-        byType[mission.type] = (byType[mission.type] ?? 0) + 1;
-
-        // Nach Monat zählen
-        final monthKey = DateFormat('yyyy-MM').format(mission.startTime);
-        byMonth[monthKey] = (byMonth[monthKey] ?? 0) + 1;
-      }
-
-      return {
-        'total': snapshot.docs.length,
-        'byType': byType,
-        'byMonth': byMonth,
-      };
-    } catch (e) {
-      print('Fehler beim Abrufen der Einsatzstatistiken: $e');
-      return {
-        'total': 0,
-        'byType': <String, int>{},
-        'byMonth': <String, int>{},
-      };
-    }
-  }
-
-  // NEUE METHODE: Prüft ob Benutzer Einsatz bearbeiten kann
-  Future<bool> canEditMission(String missionId) async {
-    try {
-      final isAdmin = await _permissionService.isAdmin();
-      if (isAdmin) return true;
-
-      // Weitere Logik könnte hier hinzugefügt werden, z.B.
-      // ob der Benutzer der Ersteller des Einsatzes ist
-      return false;
+      final user = await _permissionService.getCurrentUser();
+      if (user == null) return false;
+      if (user.isAdmin) return true;
+      if (!user.permissions.missionEdit) return false;
+      return mission.fireStation == user.fireStation;
     } catch (e) {
       print('Fehler beim Prüfen der Bearbeitungsberechtigung: $e');
       return false;
     }
   }
 
-  // NEUE METHODE: Suche nach Einsätzen mit Berechtigungsprüfung
+  // ── Such-Methoden ─────────────────────────────────────────────────────────
+
   Future<List<MissionModel>> searchMissions(String searchTerm) async {
     try {
       final canViewAll = await _permissionService.canViewAllMissions();
-      List<MissionModel> results = [];
+      final results = <MissionModel>[];
+      final addedIds = <String>{};
 
-      // Suche nach Namen
-      QuerySnapshot nameQuery = await _firestore
+      final nameQuery = await _firestore
           .collection('missions')
           .where('name', isGreaterThanOrEqualTo: searchTerm)
-          .where('name', isLessThan: searchTerm + 'z')
+          .where('name', isLessThan: '${searchTerm}z')
           .get();
 
-      // Suche nach Ort
-      QuerySnapshot locationQuery = await _firestore
+      final locationQuery = await _firestore
           .collection('missions')
           .where('location', isGreaterThanOrEqualTo: searchTerm)
-          .where('location', isLessThan: searchTerm + 'z')
+          .where('location', isLessThan: '${searchTerm}z')
           .get();
 
-      Set<String> addedIds = {};
-
-      for (var doc in [...nameQuery.docs, ...locationQuery.docs]) {
+      for (final doc in [...nameQuery.docs, ...locationQuery.docs]) {
         if (addedIds.contains(doc.id)) continue;
-
-        final mission = MissionModel.fromMap(
-            doc.data() as Map<String, dynamic>, doc.id);
-
+        final mission =
+            MissionModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
         if (canViewAll || await hasAccessToMission(mission)) {
           results.add(mission);
           addedIds.add(doc.id);
@@ -451,22 +321,65 @@ class MissionService {
       return [];
     }
   }
-  // UPDATED: Einsätze nach Feuerwehr abrufen - berücksichtigt jetzt auch involvedFireStations
-  Stream<List<MissionModel>> getMissionsByFireStation(String fireStation) {
-    return _firestore
+
+  // ── Schreib-Methoden ──────────────────────────────────────────────────────
+
+  Future<DocumentReference> createMission(MissionModel mission) async {
+    final canCreate =
+        await _permissionService.canPerformAction('add_missions');
+    if (!canCreate) {
+      throw Exception('Keine Berechtigung zum Erstellen von Einsätzen');
+    }
+
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
+
+    return await _firestore.collection('missions').add(mission.toMap());
+  }
+
+  Future<void> updateMission(MissionModel mission) async {
+    final canEdit = await _permissionService.canEditMissions();
+    if (!canEdit) {
+      throw Exception('Keine Berechtigung zum Bearbeiten von Einsätzen');
+    }
+
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
+
+    final missionData = mission.toMap();
+    missionData['updatedAt'] = Timestamp.now();
+    missionData['updatedBy'] = currentUser.uid;
+
+    await _firestore
         .collection('missions')
-        .orderBy('startTime', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => MissionModel.fromMap(
-          doc.data() as Map<String, dynamic>, doc.id))
-          .where((mission) {
-        // Prüfe sowohl das Haupt-fireStation Feld als auch die involvedFireStations Liste
-        return mission.fireStation == fireStation ||
-            mission.involvedFireStations.contains(fireStation);
-      })
-          .toList();
+        .doc(mission.id)
+        .update(missionData);
+  }
+
+  Future<void> deleteMission(String missionId) async {
+    final canDelete = await _permissionService.canEditMissions();
+    if (!canDelete) {
+      throw Exception('Keine Berechtigung zum Löschen von Einsätzen');
+    }
+    await _firestore.collection('missions').doc(missionId).delete();
+  }
+
+  Future<void> addEquipmentToMission(
+      String missionId, List<String> equipmentIds) async {
+    final canUpdate =
+        await _permissionService.canPerformAction('add_missions');
+    if (!canUpdate) {
+      throw Exception(
+          'Keine Berechtigung zum Hinzufügen von Ausrüstung zu Einsätzen');
+    }
+
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) throw Exception('Kein Benutzer angemeldet');
+
+    await _firestore.collection('missions').doc(missionId).update({
+      'equipmentIds': FieldValue.arrayUnion(equipmentIds),
+      'updatedAt': Timestamp.now(),
+      'updatedBy': currentUser.uid,
     });
   }
 }

@@ -31,12 +31,24 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+  // FIX: immersiveSticky → edgeToEdge
+  //
+  // immersiveSticky versteckt Statusbar und Navigationleiste komplett.
+  // Das ist problematisch für eine Feuerwehr-App: eingehende Anrufe,
+  // Benachrichtigungen und die Uhr sind während des Einsatzes nicht sichtbar.
+  //
+  // edgeToEdge zeigt Statusbar und Navigationsleiste weiterhin an,
+  // rendert den App-Inhalt aber dahinter (modernes Android-Verhalten).
+  // Transparente Bars lassen Inhalte durchscheinen ohne sie zu verstecken.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
-
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -64,8 +76,6 @@ class MyApp extends StatelessWidget {
     final themeService = Provider.of<ThemeService>(context);
 
     return MaterialApp(
-
-
       title: 'Einsatzkleidung',
       debugShowCheckedModeBanner: false,
       theme: themeService.getLightTheme(),
@@ -88,68 +98,24 @@ class MyApp extends StatelessWidget {
       // Durch ValueKey(uid) wird der innere Stream bei jedem neuen Login
       // komplett neu aufgebaut → kein gecachter Zustand.
       home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
+        stream: AuthService().user,
         builder: (context, authSnapshot) {
-          // Firebase noch nicht bereit
           if (authSnapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
 
-          // Nicht eingeloggt → Login
-          if (!authSnapshot.hasData) {
-            return const LoginScreen();
-          }
+          final user = authSnapshot.data;
+          if (user == null) return const LoginScreen();
 
-          final uid = authSnapshot.data!.uid;
-
-          // Eingeloggt → Live-Listener auf Firestore
           return StreamBuilder<Map<String, dynamic>>(
-            key: ValueKey(uid),
-            stream: AuthService().watchUserStatus(uid),
+            key: ValueKey(user.uid),
+            stream: AuthService().watchUserStatus(user.uid),
             builder: (context, statusSnapshot) {
-              // Firestore noch nicht geantwortet
               if (statusSnapshot.connectionState == ConnectionState.waiting) {
                 return const Scaffold(
-                  body: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 24),
-                        Text('Benutzerstatus wird geprüft...'),
-                      ],
-                    ),
-                  ),
-                );
-              }
-
-              // Verbindungsfehler
-              if (statusSnapshot.hasError) {
-                return Scaffold(
-                  body: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.wifi_off,
-                              size: 64, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          const Text('Verbindungsfehler',
-                              style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 24),
-                          ElevatedButton(
-                            onPressed: () => AuthService().signOut(),
-                            child: const Text('Abmelden'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  body: Center(child: CircularProgressIndicator()),
                 );
               }
 
@@ -159,19 +125,14 @@ class MyApp extends StatelessWidget {
                 'isProfileComplete': false,
               };
 
-              // Profil unvollständig
               if (!status['exists'] || !status['isProfileComplete']) {
                 return const ProfileCompletionScreen();
               }
 
-              // Warten auf Admin-Freigabe
-              // Sobald Admin freigibt, feuert watchUserStatus erneut
-              // → dieser StreamBuilder baut automatisch HomeScreen
               if (!status['isApproved']) {
                 return const PendingApprovalScreen();
               }
 
-              // Alles OK
               return const HomeScreen();
             },
           );

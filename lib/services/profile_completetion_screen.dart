@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../Lists/fire_stations.dart';
 import '../services/auth_service.dart';
+import '../services/permission_service.dart';
 
 class ProfileCompletionScreen extends StatefulWidget {
   const ProfileCompletionScreen({Key? key}) : super(key: key);
@@ -16,6 +17,7 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final AuthService _authService = AuthService();
+  final PermissionService _permissionService = PermissionService();
 
   String _selectedRole = '';
   String _selectedFireStation = '';
@@ -54,22 +56,26 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
       if (currentUser == null) return;
 
       await _authService.updateUserProfile(
-        currentUser.uid,
-        _nameController.text.trim(),
-        _selectedRole,
-        _selectedFireStation,
+        userId: currentUser.uid,
+        name: _nameController.text.trim(),
+        role: _selectedRole,
+        fireStation: _selectedFireStation,
       );
+
+      // Cache leeren damit der nächste getCurrentUser()-Aufruf
+      // die neuen Profildaten aus Firestore liest
+      _permissionService.invalidateCache();
 
       // watchUserStatus erkennt isProfileComplete: true →
       // StreamBuilder in main.dart wechselt automatisch zu PendingApprovalScreen.
       // KEINE manuelle Navigation — der Screen wird vom StreamBuilder ersetzt.
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Fehler beim Speichern: $e'),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
         setState(() => _isLoading = false);
@@ -110,6 +116,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 24),
+
+                // ── Name ──────────────────────────────────────────────────
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
@@ -125,6 +133,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
+
+                // ── Funktion ──────────────────────────────────────────────
                 DropdownButtonFormField<String>(
                   value: _selectedRole,
                   decoration: const InputDecoration(
@@ -138,11 +148,12 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   onChanged: (v) {
                     if (v != null) setState(() => _selectedRole = v);
                   },
-                  validator: (v) => v == null || v.isEmpty
-                      ? 'Bitte wählen Sie Ihre Funktion'
-                      : null,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Bitte wählen Sie Ihre Funktion' : null,
                 ),
                 const SizedBox(height: 16),
+
+                // ── Ortsfeuerwehr ─────────────────────────────────────────
                 DropdownButtonFormField<String>(
                   value: _selectedFireStation,
                   decoration: const InputDecoration(
@@ -156,11 +167,12 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                   onChanged: (v) {
                     if (v != null) setState(() => _selectedFireStation = v);
                   },
-                  validator: (v) => v == null || v.isEmpty
-                      ? 'Bitte wählen Sie Ihre Ortsfeuerwehr'
-                      : null,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Bitte wählen Sie Ihre Ortsfeuerwehr' : null,
                 ),
                 const SizedBox(height: 32),
+
+                // ── Speichern ─────────────────────────────────────────────
                 ElevatedButton(
                   onPressed: _isLoading ? null : _completeProfile,
                   style: ElevatedButton.styleFrom(
@@ -172,8 +184,10 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Profil speichern',
-                          style: TextStyle(fontSize: 16)),
+                      : const Text(
+                          'Profil speichern',
+                          style: TextStyle(fontSize: 16),
+                        ),
                 ),
               ],
             ),

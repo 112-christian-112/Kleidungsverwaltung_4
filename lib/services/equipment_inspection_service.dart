@@ -169,20 +169,128 @@ class EquipmentInspectionService {
             .toList());
   }
 
-  Stream<List<EquipmentInspectionModel>> getUpcomingInspections() {
-    final now = DateTime.now();
-    final threeMonthsFromNow = now.add(const Duration(days: 90));
+  /// Liefert sowohl überfällige als auch demnächst fällige Prüfungen —
+  /// dedupliziert nach equipmentId (nur die jeweils neueste Prüfung pro Gerät).
+  ///
+  /// Hintergrund: equipment_inspections enthält alle historischen Prüfungen.
+  /// Ohne Deduplizierung taucht ein 5x geprüftes Gerät 5x in der Liste auf,
+  /// da alle alten Prüfungen ebenfalls ein nextInspectionDate in der
+  /// Vergangenheit haben.
+  ///
+  /// Firestore liefert bei `.orderBy('inspectionDate', descending: true)`
+  /// die neueste Prüfung eines Geräts immer zuerst — wir behalten nur den
+  /// ersten Treffer pro equipmentId.
+  ///
+  /// [daysAhead] bestimmt den Vorlaufzeitraum (Standard: 90 Tage).
+  Stream<List<EquipmentInspectionModel>> getUpcomingInspections({
+    int daysAhead = 90,
+  }) {
+    final upperBound = DateTime.now().add(Duration(days: daysAhead));
 
     return _firestore
         .collection('equipment_inspections')
-        .where('nextInspectionDate', isGreaterThanOrEqualTo: now)
-        .where('nextInspectionDate', isLessThanOrEqualTo: threeMonthsFromNow)
-        .orderBy('nextInspectionDate')
+        // Kein isGreaterThanOrEqualTo-Filter → überfällige werden mitgeliefert
+        .where('nextInspectionDate',
+            isLessThanOrEqualTo: Timestamp.fromDate(upperBound))
+        // Neueste Prüfung zuerst → erster Treffer pro equipmentId ist aktuellste
+        .orderBy('inspectionDate', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => EquipmentInspectionModel.fromMap(
-                doc.data() as Map<String, dynamic>, doc.id))
-            .toList());
+        .map((snapshot) {
+          final all = snapshot.docs
+              .map((doc) => EquipmentInspectionModel.fromMap(
+                  doc.data() as Map<String, dynamic>, doc.id))
+              .toList();
+
+          // Deduplizieren: nur neueste Prüfung pro equipmentId behalten
+          final seen = <String>{};
+          final deduplicated = <EquipmentInspectionModel>[];
+          for (final inspection in all) {
+            if (seen.add(inspection.equipmentId)) {
+              deduplicated.add(inspection);
+            }
+          }
+
+          // Überfälligste zuerst sortieren (ältestes nextInspectionDate vorn)
+          deduplicated.sort(
+              (a, b) => a.nextInspectionDate.compareTo(b.nextInspectionDate));
+          return deduplicated;
+        });
+  }
+
+  /// Nur überfällige Prüfungen (nextInspectionDate < heute) — dedupliziert.
+  /// Nützlich für Badge-Anzeigen oder Push-Benachrichtigungen.
+  Stream<List<EquipmentInspectionModel>> getOverdueInspections() {
+    final now = DateTime.now();
+
+    return _firestore
+        .collection('equipment_inspections')
+        .where('nextInspectionDate', isLessThan: Timestamp.fromDate(now))
+        .orderBy('inspectionDate', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          final all = snapshot.docs
+              .map((doc) => EquipmentInspectionModel.fromMap(
+                  doc.data() as Map<String, dynamic>, doc.id))
+              .toList();
+
+          // Deduplizieren: nur neueste Prüfung pro equipmentId behalten
+          final seen = <String>{};
+          final deduplicated = <EquipmentInspectionModel>[];
+          for (final inspection in all) {
+            if (seen.add(inspection.equipmentId)) {
+              deduplicated.add(inspection);
+            }
+          }
+
+          deduplicated.sort(
+              (a, b) => a.nextInspectionDate.compareTo(b.nextInspectionDate));
+          return deduplicated;
+        });
+  }
+
+  /// Anzahl überfälliger Prüfungen (dedupliziert) — für Badge/Counter in der UI.
+  Stream<int> getOverdueInspectionCount() {
+    return getOverdueInspections().map((list) => list.length);
+  }
+
+  // ── Einmalige Reads (Future) ───────────────────────────────────────────────
+
+  /// Alle Prüfungen einmalig abrufen (kein Stream → kein "already listened")
+  Future<List<EquipmentInspectionModel>> getAllInspectionsFuture() async {
+    try {
+      final snapshot = await _firestore
+          .collection('equipment_inspections')
+          .orderBy('inspectionDate', descending: true)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => EquipmentInspectionModel.fromMap(
+              doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+    } catch (e) {
+      print('Fehler beim Abrufen aller Prüfungen: $e');
+      return [];
+    }
+  }
+
+  /// Alle Prüfungen für eine bestimmte Ausrüstung einmalig abrufen
+  Future<List<EquipmentInspectionModel>> getInspectionsForEquipmentFuture(
+      String equipmentId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('equipment_inspections')
+          .where('equipmentId', isEqualTo: equipmentId)
+          .orderBy('inspectionDate', descending: true)
+          .get();
+
+      return snapshot.docs
+          .map((doc) => EquipmentInspectionModel.fromMap(
+              doc.data() as Map<String, dynamic>, doc.id))
+          .toList();
+    } catch (e) {
+      print('Fehler beim Abrufen der Prüfungen für $equipmentId: $e');
+      return [];
+    }
   }
 
   // ── Hilfsmethoden ─────────────────────────────────────────────────────────
@@ -208,44 +316,4 @@ class EquipmentInspectionService {
         return 'Durchgefallen';
     }
   }
-
-  /// Alle Prüfungen einmalig abrufen (kein Stream → kein "already listened")
-  Future<List<EquipmentInspectionModel>> getAllInspectionsFuture() async {
-    try {
-      final snapshot = await _firestore
-          .collection('equipment_inspections')
-          .orderBy('inspectionDate', descending: true)
-          .get();
-
-      return snapshot.docs
-          .map((doc) => EquipmentInspectionModel.fromMap(
-          doc.data() as Map<String, dynamic>, doc.id))
-          .toList();
-    } catch (e) {
-      print('Fehler beim Abrufen aller Prüfungen: $e');
-      return [];
-    }
-  }
-
-  /// Alle Prüfungen für eine bestimmte Ausrüstung einmalig abrufen
-  Future<List<EquipmentInspectionModel>> getInspectionsForEquipmentFuture(
-      String equipmentId) async {
-    try {
-      final snapshot = await _firestore
-          .collection('equipment_inspections')
-          .where('equipmentId', isEqualTo: equipmentId)
-          .orderBy('inspectionDate', descending: true)
-          .get();
-
-      return snapshot.docs
-          .map((doc) => EquipmentInspectionModel.fromMap(
-          doc.data() as Map<String, dynamic>, doc.id))
-          .toList();
-    } catch (e) {
-      print('Fehler beim Abrufen der Prüfungen für $equipmentId: $e');
-      return [];
-    }
-  }
-
 }
-

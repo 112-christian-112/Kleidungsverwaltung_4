@@ -3,34 +3,77 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_models.dart';
 
-/// Zentraler Berechtigungs-Service.
+/// Zentraler Berechtigungs-Service mit In-Memory-Cache.
 ///
-/// Jede public-Methode macht intern **einen** Firestore-Read via
-/// [_fetchCurrentUser] und leitet daraus das Ergebnis ab.
-/// Screens, die mehrere Informationen gleichzeitig brauchen, sollen
-/// stattdessen direkt [getCurrentUser] aufrufen und das [UserModel]
-/// lokal auswerten — so spart man mehrere sequenzielle Reads.
+/// [_fetchCurrentUser] macht pro Cache-Miss einen Firestore-Read und
+/// hält das Ergebnis für [_cacheTtl] im Speicher. Alle public-Methoden
+/// profitieren automatisch vom Cache.
+///
+/// Cache wird invalidiert bei:
+/// - [invalidateCache] manuell aufrufen (z.B. nach Profil-Update)
+/// - Automatisch nach [_cacheTtl] (Standard: 60 Sekunden)
+/// - Automatisch bei Benutzerwechsel (andere UID)
 class PermissionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // ── Cache ─────────────────────────────────────────────────────────────────
+
+  static const Duration _cacheTtl = Duration(seconds: 60);
+
+  UserModel? _cachedUser;
+  DateTime? _cacheTimestamp;
+  String? _cachedUid;
+
+  bool get _isCacheValid {
+    if (_cachedUser == null || _cacheTimestamp == null || _cachedUid == null) {
+      return false;
+    }
+    final currentUid = _auth.currentUser?.uid;
+    if (currentUid != _cachedUid) return false;
+    return DateTime.now().difference(_cacheTimestamp!) < _cacheTtl;
+  }
+
+  /// Cache manuell leeren — aufrufen wenn das eigene Profil geändert wurde
+  /// (z.B. nach Rolle/Station-Update durch Admin).
+  void invalidateCache() {
+    _cachedUser = null;
+    _cacheTimestamp = null;
+    _cachedUid = null;
+  }
+
   // ── Interner Basis-Read ───────────────────────────────────────────────────
 
-  /// Lädt das [UserModel] des aktuell eingeloggten Benutzers.
-  /// Gibt `null` zurück wenn kein User eingeloggt ist oder das Dokument
-  /// nicht existiert.
   Future<UserModel?> _fetchCurrentUser() async {
+    // Cache-Treffer: direkt zurückgeben, kein Firestore-Read
+    if (_isCacheValid) return _cachedUser;
+
     try {
       final firebaseUser = _auth.currentUser;
-      if (firebaseUser == null) return null;
+      if (firebaseUser == null) {
+        invalidateCache();
+        return null;
+      }
 
       final doc = await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
           .get();
-      if (!doc.exists) return null;
 
-      return UserModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+      if (!doc.exists) {
+        invalidateCache();
+        return null;
+      }
+
+      final user =
+          UserModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+
+      // Im Cache speichern
+      _cachedUser = user;
+      _cacheTimestamp = DateTime.now();
+      _cachedUid = firebaseUser.uid;
+
+      return user;
     } catch (e) {
       print('PermissionService._fetchCurrentUser: $e');
       return null;
@@ -50,7 +93,7 @@ class PermissionService {
   Future<String> getUserFireStation() async =>
       (await _fetchCurrentUser())?.fireStation ?? '';
 
-  // ── Berechtigungs-Shortcuts (jeweils 1 Firestore-Read) ───────────────────
+  // ── Berechtigungs-Shortcuts (nutzen jetzt den Cache) ─────────────────────
 
   Future<UserPermissions> _permissions() async {
     final user = await _fetchCurrentUser();
@@ -93,7 +136,7 @@ class PermissionService {
     final user = await _fetchCurrentUser();
     if (user == null) return [];
     if (user.isAdmin || user.permissions.visibleFireStations.contains('*')) {
-      return ['*']; // alle
+      return ['*'];
     }
     return <String>{user.fireStation, ...user.permissions.visibleFireStations}
         .toList();
@@ -109,20 +152,25 @@ class PermissionService {
 
   /// Speichert die Permissions als flache perm_-Felder direkt im
   /// Firestore-Dokument — konsistent mit [UserPermissions.fromMap].
+  ///
+  /// Invalidiert den Cache automatisch wenn die eigenen Permissions
+  /// geändert wurden.
   Future<void> saveUserPermissions(
       String userId, UserPermissions permissions) async {
     await _firestore
         .collection('users')
         .doc(userId)
-        .update(permissions.toMap()); // toMap() liefert flache perm_-Felder
+        .update(permissions.toMap());
+
+    // Cache leeren wenn die eigenen Permissions geändert wurden
+    if (userId == _auth.currentUser?.uid) {
+      invalidateCache();
+    }
   }
 
   Future<bool> canViewUserRoles() async => isAdmin();
 
   // ── Altes String-basiertes Interface (Kompatibilität) ────────────────────
-  //
-  // Screens die noch nicht migriert sind, können weiterhin
-  // canPerformAction('edit_equipment') aufrufen.
 
   Future<bool> canPerformAction(String action) async {
     final perms = await _permissions();

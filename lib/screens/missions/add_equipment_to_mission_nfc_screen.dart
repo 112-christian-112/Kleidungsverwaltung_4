@@ -1,13 +1,13 @@
 // screens/missions/add_equipment_to_mission_nfc_screen.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nfc_manager/nfc_manager.dart';
-import '../../Lists/fire_stations.dart';
 import '../../models/equipment_model.dart';
 import '../../models/user_models.dart';
 import '../../services/equipment_service.dart';
 import '../../services/mission_service.dart';
 import '../../services/permission_service.dart';
+import '../../widgets/nfc_scan_sheet.dart';
 
 class AddEquipmentToMissionNfcScreen extends StatefulWidget {
   final String missionId;
@@ -26,43 +26,28 @@ class AddEquipmentToMissionNfcScreen extends StatefulWidget {
 
 class _AddEquipmentToMissionNfcScreenState
     extends State<AddEquipmentToMissionNfcScreen>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   final EquipmentService _equipmentService = EquipmentService();
   final MissionService _missionService = MissionService();
   final PermissionService _permissionService = PermissionService();
 
   late TabController _tabController;
-  Timer? _resetTimer;
 
-  // User
   UserModel? _currentUser;
   bool _isLoadingUser = true;
-
-  // Sichtbare Stationen für diesen Einsatz
   List<String> _availableFireStations = [];
 
-  // NFC
-  bool _isScanning = false;
-  bool _isNfcAvailable = false;
-  bool _sessionActive = false;
-  String _statusMessage = 'Bereit zum Scannen';
-  String _lastScannedTagId = '';
-
-  // Manueller Tab – Filter
+  // Filter (Hinzufügen-Tab)
   String _searchQuery = '';
   String _selectedFireStationFilter = 'Alle';
-  String _selectedOwnerFilter = 'Alle';
   String _selectedTypeFilter = 'Alle';
   String _selectedStatusFilter = 'Einsatzbereit';
-  bool _groupByOwner = true;
   bool _showFilters = false;
-  final Set<String> _expandedOwners = {};
 
-  // Shared
+  List<EquipmentModel> _allEquipment = [];
   List<EquipmentModel> _selectedEquipment = [];
   bool _isProcessing = false;
 
-  // Berechtigungen
   bool get _canSeeAllStations =>
       _currentUser?.isAdmin == true ||
       _currentUser?.permissions.visibleFireStations.contains('*') == true ||
@@ -72,19 +57,16 @@ class _AddEquipmentToMissionNfcScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _checkNfcAvailability();
     _loadUser();
   }
 
   @override
   void dispose() {
-    _resetTimer?.cancel();
-    _stopNfcSession();
     _tabController.dispose();
     super.dispose();
   }
 
-  // ── User & Stationen laden ────────────────────────────────────────────────
+  // ── User laden ────────────────────────────────────────────────────────────
 
   Future<void> _loadUser() async {
     setState(() => _isLoadingUser = true);
@@ -92,31 +74,25 @@ class _AddEquipmentToMissionNfcScreenState
       final user = await _permissionService.getCurrentUser();
       if (user == null || !mounted) return;
 
-      // Verfügbare Stationen für diesen Einsatz ermitteln
       List<String> stations = [user.fireStation];
-
       final canSeeAll = user.isAdmin ||
           user.permissions.visibleFireStations.contains('*');
 
       if (canSeeAll) {
-        // Alle beteiligten Stationen aus der Mission laden
-        final mission =
-            await _missionService.getMissionById(widget.missionId);
+        final mission = await _missionService.getMissionById(widget.missionId);
         if (mission != null) {
-          final Set<String> missionStations = {
+          final Set<String> s = {
             mission.fireStation,
             ...mission.involvedFireStations,
             user.fireStation,
           };
-          stations = missionStations.toList()..sort();
+          stations = s.toList()..sort();
         }
       } else {
-        // User mit sichtbaren Stationen: eigene + freigegebene
         stations = {
           user.fireStation,
           ...user.permissions.visibleFireStations,
-        }.toList()
-          ..sort();
+        }.toList()..sort();
       }
 
       if (mounted) {
@@ -125,233 +101,117 @@ class _AddEquipmentToMissionNfcScreenState
           _availableFireStations = stations;
           _isLoadingUser = false;
         });
+        _loadEquipment();
       }
     } catch (e) {
-      print('Fehler _loadUser: $e');
       if (mounted) setState(() => _isLoadingUser = false);
     }
   }
 
-  // ── NFC ───────────────────────────────────────────────────────────────────
-
-  Future<void> _checkNfcAvailability() async {
+  Future<void> _loadEquipment() async {
     try {
-      _isNfcAvailable = await NfcManager.instance.isAvailable();
-      if (mounted) setState(() {});
-    } catch (_) {}
-  }
-
-  Future<void> _startContinuousNfcSession() async {
-    if (!_isNfcAvailable) return;
-    setState(() {
-      _sessionActive = true;
-      _isScanning = true;
-      _statusMessage = 'NFC-Tag an Gerät halten...';
-    });
-
-    NfcManager.instance.startSession(onDiscovered: (NfcTag tag) async {
-      final id = _extractNfcId(tag);
-      if (id.isEmpty || id == _lastScannedTagId) return;
-      _lastScannedTagId = id;
-      await _processNfcTag(id);
-    });
-  }
-
-  String _extractNfcId(NfcTag tag) {
-    try {
-      // NFC-A (häufigster Typ)
-      if (tag.data.containsKey('nfca')) {
-        final id = tag.data['nfca']['identifier'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-      // NDEF - aber NUR die Hardware-UID, NICHT den Payload!
-      if (tag.data.containsKey('ndef')) {
-        final id = tag.data['ndef']['identifier'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-      // NFC-B
-      if (tag.data.containsKey('nfcb')) {
-        final id = tag.data['nfcb']['applicationData'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-      // NFC-F
-      if (tag.data.containsKey('nfcf')) {
-        final id = tag.data['nfcf']['identifier'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-      // NFC-V
-      if (tag.data.containsKey('nfcv')) {
-        final id = tag.data['nfcv']['identifier'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-      // Generischer Fallback
-      for (final key in tag.data.keys) {
-        final id = tag.data[key]?['identifier'] as List<int>?;
-        if (id != null) return _bytesToHex(id);
-      }
-    } catch (_) {}
-    return '';
-  }
-
-// Hilfsmethode hinzufügen (identisch zum Admin-Screen)
-  String _bytesToHex(List<int> bytes) {
-    if (bytes.isEmpty) return '';
-    final buffer = StringBuffer();
-    for (int i = 0; i < bytes.length; i++) {
-      if (i > 0) buffer.write(':');
-      buffer.write(bytes[i].toRadixString(16).padLeft(2, '0').toUpperCase());
+      _equipmentService.getEquipmentByUserAccess().listen((list) {
+        if (mounted) setState(() => _allEquipment = list);
+      });
+    } catch (e) {
+      // ignore
     }
-    return buffer.toString();
+  }
+
+  // ── NFC Scan ──────────────────────────────────────────────────────────────
+
+  Future<void> _scanNfc() async {
+    final tagId = await NfcScanSheet.zeigen(
+      context,
+      hinweisText: 'NFC-Tag der Einsatzkleidung an Gerät halten',
+    );
+    if (tagId == null || tagId.isEmpty || !mounted) return;
+    await _processNfcTag(tagId);
   }
 
   Future<void> _processNfcTag(String tagId) async {
-    setState(() => _statusMessage = 'Suche Ausrüstung für Tag: $tagId...');
     try {
-      final equipment =
-          await _equipmentService.getEquipmentByNfcTag(tagId);
+      final equipment = await _equipmentService.getEquipmentByNfcTag(tagId);
+      if (!mounted) return;
+
       if (equipment == null) {
-        setState(() => _statusMessage = 'Keine Ausrüstung für diesen Tag gefunden');
-        _resetStatusAfterDelay();
+        _showSnack('Kein Kleidungsstück für diesen Tag gefunden', Colors.orange);
         return;
       }
-      if (_isEquipmentAlreadyAdded(equipment)) {
-        setState(() => _statusMessage =
-            '${equipment.article} ist bereits im Einsatz');
-        _resetStatusAfterDelay();
+      if (widget.alreadyAddedEquipmentIds.contains(equipment.id)) {
+        _showSnack('${equipment.article} ist bereits im Einsatz', Colors.orange);
         return;
       }
-      if (_isEquipmentSelected(equipment)) {
-        setState(() =>
-            _statusMessage = '${equipment.article} bereits ausgewählt');
-        _resetStatusAfterDelay();
+      if (_selectedEquipment.any((e) => e.id == equipment.id)) {
+        _showSnack('${equipment.article} bereits ausgewählt', Colors.orange);
         return;
       }
+
       setState(() {
         _selectedEquipment.add(equipment);
-        _statusMessage =
-            '✓ ${equipment.article} (${equipment.owner}) hinzugefügt';
+        // Nach Scan direkt auf "Ausgewählt"-Tab wechseln
+        _tabController.animateTo(0);
       });
-      _resetStatusAfterDelay();
+      _showSnack('✓ ${equipment.article} · ${equipment.owner}', Colors.green);
     } catch (e) {
-      setState(() => _statusMessage = 'Fehler: $e');
-      _resetStatusAfterDelay();
+      if (mounted) _showSnack('Fehler: $e', Colors.red);
     }
   }
 
-  void _resetStatusAfterDelay() {
-    _resetTimer?.cancel();
-    _resetTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _statusMessage = 'Bereit zum Scannen';
-          _lastScannedTagId = '';
-        });
-      }
-    });
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
+    ));
   }
 
-  Future<void> _stopNfcSession() async {
-    try {
-      _resetTimer?.cancel();
-      _sessionActive = false;
-      await NfcManager.instance.stopSession();
-    } catch (_) {}
-  }
+  // ── Toggle Auswahl ────────────────────────────────────────────────────────
 
-  void _restartNfcSession() {
-    _stopNfcSession().then((_) {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) _startContinuousNfcSession();
-      });
-    });
-  }
-
-  // ── Auswahl-Logik ─────────────────────────────────────────────────────────
-
-  void _toggleSelection(EquipmentModel equipment) {
+  void _toggleSelection(EquipmentModel e) {
     setState(() {
-      final idx = _selectedEquipment.indexWhere((e) => e.id == equipment.id);
+      final idx = _selectedEquipment.indexWhere((s) => s.id == e.id);
       if (idx >= 0) {
         _selectedEquipment.removeAt(idx);
       } else {
-        _selectedEquipment.add(equipment);
+        _selectedEquipment.add(e);
+        _tabController.animateTo(0);
       }
     });
   }
-
-  bool _isEquipmentSelected(EquipmentModel e) =>
-      _selectedEquipment.any((s) => s.id == e.id);
-
-  bool _isEquipmentAlreadyAdded(EquipmentModel e) =>
-      widget.alreadyAddedEquipmentIds.contains(e.id);
 
   // ── Filter ────────────────────────────────────────────────────────────────
 
   List<EquipmentModel> _applyFilters(List<EquipmentModel> list) {
-    var result = list;
-
+    var r = list;
     if (_selectedFireStationFilter != 'Alle') {
-      result = result
-          .where((e) => e.fireStation == _selectedFireStationFilter)
-          .toList();
+      r = r.where((e) => e.fireStation == _selectedFireStationFilter).toList();
     }
-
-    switch (_selectedStatusFilter) {
-      case 'Einsatzbereit':
-        result = result
-            .where((e) => e.status == EquipmentStatus.ready)
-            .toList();
-        break;
-      case 'In Reinigung':
-        result = result
-            .where((e) => e.status == EquipmentStatus.cleaning)
-            .toList();
-        break;
-      case 'Alle':
-      default:
-        break;
-    }
-
-    if (_selectedOwnerFilter != 'Alle') {
-      result =
-          result.where((e) => e.owner == _selectedOwnerFilter).toList();
-    }
-
     if (_selectedTypeFilter != 'Alle') {
-      result =
-          result.where((e) => e.type == _selectedTypeFilter).toList();
+      r = r.where((e) => e.type == _selectedTypeFilter).toList();
     }
-
+    if (_selectedStatusFilter != 'Alle') {
+      r = r.where((e) => e.status == _selectedStatusFilter).toList();
+    }
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result
-          .where((e) =>
-              e.owner.toLowerCase().contains(q) ||
-              e.nfcTag.toLowerCase().contains(q) ||
-              e.article.toLowerCase().contains(q) ||
-              e.size.toLowerCase().contains(q))
-          .toList();
+      r = r.where((e) =>
+          e.owner.toLowerCase().contains(q) ||
+          e.article.toLowerCase().contains(q) ||
+          e.nfcTag.toLowerCase().contains(q)).toList();
     }
-
-    // Sortierung
-    result.sort((a, b) => a.owner.compareTo(b.owner));
-
-    return result;
+    return r;
   }
 
-  void _resetFilters() {
-    setState(() {
-      _selectedFireStationFilter = 'Alle';
-      _selectedOwnerFilter = 'Alle';
-      _selectedTypeFilter = 'Alle';
-      _selectedStatusFilter = 'Einsatzbereit';
-      _searchQuery = '';
-      _groupByOwner = true;
-    });
-  }
+  void _resetFilters() => setState(() {
+        _searchQuery = '';
+        _selectedFireStationFilter = 'Alle';
+        _selectedTypeFilter = 'Alle';
+        _selectedStatusFilter = 'Alle';
+      });
 
-  Map<String, List<EquipmentModel>> _groupByOwnerMap(
-      List<EquipmentModel> list) {
+  Map<String, List<EquipmentModel>> _groupByOwnerMap(List<EquipmentModel> list) {
     final Map<String, List<EquipmentModel>> grouped = {};
     for (final e in list) {
       grouped.putIfAbsent(e.owner, () => []).add(e);
@@ -362,29 +222,23 @@ class _AddEquipmentToMissionNfcScreenState
 
   // ── Speichern ─────────────────────────────────────────────────────────────
 
-  Future<void> _saveSelectedEquipment() async {
+  Future<void> _save() async {
     if (_selectedEquipment.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Keine Ausrüstung ausgewählt'),
-          backgroundColor: Colors.orange));
+      _showSnack('Keine Ausrüstung ausgewählt', Colors.orange);
       return;
     }
     setState(() => _isProcessing = true);
     try {
       await _missionService.addEquipmentToMission(
-          widget.missionId,
-          _selectedEquipment.map((e) => e.id).toList());
+          widget.missionId, _selectedEquipment.map((e) => e.id).toList());
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Ausrüstung erfolgreich hinzugefügt'),
-            backgroundColor: Colors.green));
+        _showSnack('Ausrüstung erfolgreich hinzugefügt', Colors.green);
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Fehler: $e'), backgroundColor: Colors.red));
+        _showSnack('Fehler: $e', Colors.red);
       }
     }
   }
@@ -398,12 +252,76 @@ class _AddEquipmentToMissionNfcScreenState
         title: Text(_selectedEquipment.isEmpty
             ? 'Ausrüstung hinzufügen'
             : '${_selectedEquipment.length} ausgewählt'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.nfc), text: 'NFC Scan'),
-            Tab(icon: Icon(Icons.list), text: 'Manuell'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(96),
+          child: Column(
+            children: [
+              // NFC-Button immer sichtbar in der AppBar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _isLoadingUser ? null : _scanNfc,
+                    icon: const Icon(Icons.nfc, size: 18),
+                    label: const Text('NFC-Tag scannen'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Theme.of(context).colorScheme.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+              ),
+              TabBar(
+                controller: _tabController,
+                tabs: [
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 16),
+                        const SizedBox(width: 6),
+                        const Text('Ausgewählt'),
+                        if (_selectedEquipment.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primary,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${_selectedEquipment.length}',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onPrimary,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add, size: 16),
+                        SizedBox(width: 6),
+                        Text('Hinzufügen'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
       body: _isLoadingUser
@@ -411,445 +329,41 @@ class _AddEquipmentToMissionNfcScreenState
           : TabBarView(
               controller: _tabController,
               children: [
-                _buildNfcTab(),
-                _buildManualTab(),
+                _buildAusgewaehltTab(),
+                _buildHinzufuegenTab(),
               ],
             ),
       bottomNavigationBar: _buildBottomBar(),
     );
   }
 
-  // ── NFC Tab ───────────────────────────────────────────────────────────────
+  // ── Tab: Ausgewählt ───────────────────────────────────────────────────────
 
-  Widget _buildNfcTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Session-Status
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _sessionActive
-                          ? Colors.green[100]
-                          : Colors.red[100],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: _sessionActive
-                              ? Colors.green
-                              : Colors.red),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _sessionActive
-                              ? Icons.wifi_tethering
-                              : Icons.wifi_tethering_off,
-                          size: 14,
-                          color: _sessionActive
-                              ? Colors.green
-                              : Colors.red),
-                        const SizedBox(width: 4),
-                        Text(
-                          _sessionActive
-                              ? 'NFC Session aktiv'
-                              : 'NFC Session gestoppt',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: _sessionActive
-                                  ? Colors.green[800]
-                                  : Colors.red[800],
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Status-Meldung
-                  Row(
-                    children: [
-                      Icon(
-                        _isScanning
-                            ? Icons.nfc
-                            : (_isNfcAvailable
-                                ? Icons.check_circle
-                                : Icons.error),
-                        color: _isScanning
-                            ? Colors.blue
-                            : (_isNfcAvailable
-                                ? Colors.green
-                                : Colors.red),
-                        size: 24,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Text(_statusMessage,
-                              style: const TextStyle(fontSize: 16))),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isNfcAvailable && !_sessionActive
-                              ? _startContinuousNfcSession
-                              : null,
-                          icon: const Icon(Icons.nfc),
-                          label: Text(_sessionActive
-                              ? 'Scannen läuft...'
-                              : 'NFC-Scan starten'),
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: _sessionActive
-                                  ? Colors.green
-                                  : null),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed:
-                            _sessionActive ? _restartNfcSession : null,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Neustart'),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-              'Ausgewählte Ausrüstung (${_selectedEquipment.length})',
-              style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Expanded(child: _buildSelectedEquipmentList()),
-        ],
-      ),
-    );
-  }
-
-  // ── Manueller Tab ─────────────────────────────────────────────────────────
-
-  Widget _buildManualTab() {
-    return Column(
-      children: [
-        // Suchfeld + Filter-Toggle
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(
-                    labelText: 'Suchen',
-                    hintText: 'Besitzer, NFC-Tag...',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  onChanged: (v) => setState(() => _searchQuery = v),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                onPressed: () =>
-                    setState(() => _showFilters = !_showFilters),
-                icon: Icon(
-                    _showFilters ? Icons.filter_list_off : Icons.filter_list),
-                tooltip: 'Filter',
-              ),
-              IconButton(
-                onPressed: () =>
-                    setState(() => _groupByOwner = !_groupByOwner),
-                icon: Icon(_groupByOwner ? Icons.person : Icons.view_list),
-                tooltip: _groupByOwner
-                    ? 'Listenansicht'
-                    : 'Nach Besitzer gruppieren',
-              ),
-            ],
-          ),
-        ),
-
-        // Filter-Dropdowns
-        if (_showFilters) _buildFilterDropdowns(),
-
-        // Equipment-Liste
-        Expanded(
-          child: StreamBuilder<List<EquipmentModel>>(
-            stream: _equipmentService.getEquipmentByUserAccess(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(
-                    child: Text('Fehler: ${snapshot.error}'));
-              }
-
-              final all = snapshot.data ?? [];
-              // Nur Ausrüstung aus verfügbaren Stationen
-              final stationFiltered = _availableFireStations.isEmpty
-                  ? all
-                  : all
-                      .where((e) =>
-                          _availableFireStations.contains(e.fireStation))
-                      .toList();
-
-              final filtered = _applyFilters(stationFiltered);
-
-              if (filtered.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.search_off,
-                          size: 64, color: Colors.grey.shade400),
-                      const SizedBox(height: 16),
-                      const Text('Keine Ausrüstung gefunden',
-                          style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 8),
-                      TextButton(
-                          onPressed: _resetFilters,
-                          child: const Text('Filter zurücksetzen')),
-                    ],
-                  ),
-                );
-              }
-
-              return _groupByOwner
-                  ? _buildGroupedList(filtered)
-                  : _buildFlatList(filtered);
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFilterDropdowns() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          // Ortswehr (nur wenn mehrere sichtbar)
-          if (_canSeeAllStations && _availableFireStations.length > 1)
-            SizedBox(
-              width: 200,
-              child: DropdownButtonFormField<String>(
-                value: _selectedFireStationFilter,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                    labelText: 'Ortswehr',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8)),
-                items: ['Alle', ..._availableFireStations]
-                    .toSet()
-                    .toList()
-                    .map((s) => DropdownMenuItem(
-                        value: s, child: Text(s, overflow: TextOverflow.ellipsis)))
-                    .toList(),
-                onChanged: (v) => setState(
-                    () => _selectedFireStationFilter = v ?? 'Alle'),
-              ),
-            ),
-
-          // Typ
-          SizedBox(
-            width: 140,
-            child: DropdownButtonFormField<String>(
-              value: _selectedTypeFilter,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  labelText: 'Typ',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8)),
-              items: ['Alle', 'Jacke', 'Hose']
-                  .map((t) =>
-                      DropdownMenuItem(value: t, child: Text(t)))
-                  .toList(),
-              onChanged: (v) =>
-                  setState(() => _selectedTypeFilter = v ?? 'Alle'),
-            ),
-          ),
-
-          // Status
-          SizedBox(
-            width: 160,
-            child: DropdownButtonFormField<String>(
-              value: _selectedStatusFilter,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  labelText: 'Status',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8)),
-              items: ['Alle', 'Einsatzbereit', 'In Reinigung']
-                  .map((s) =>
-                      DropdownMenuItem(value: s, child: Text(s)))
-                  .toList(),
-              onChanged: (v) =>
-                  setState(() => _selectedStatusFilter = v ?? 'Einsatzbereit'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Listen ────────────────────────────────────────────────────────────────
-
-  Widget _buildGroupedList(List<EquipmentModel> list) {
-    final grouped = _groupByOwnerMap(list);
-
-    return ListView.builder(
-      itemCount: grouped.length,
-      itemBuilder: (_, i) {
-        final owner = grouped.keys.elementAt(i);
-        final items = grouped[owner]!;
-        final selectedCount =
-            items.where((e) => _isEquipmentSelected(e)).length;
-        final availableCount =
-            items.where((e) => !_isEquipmentAlreadyAdded(e)).length;
-        final isExpanded = _expandedOwners.contains(owner);
-
-        return Card(
-          margin:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: ExpansionTile(
-            initiallyExpanded: isExpanded,
-            onExpansionChanged: (exp) => setState(() => exp
-                ? _expandedOwners.add(owner)
-                : _expandedOwners.remove(owner)),
-            leading: CircleAvatar(
-              backgroundColor: Colors.blue.shade100,
-              child: Text(owner[0].toUpperCase(),
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade800)),
-            ),
-            title: Text(owner,
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(
-                '$selectedCount von $availableCount ausgewählt',
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.secondary,
-                    fontSize: 12)),
-            trailing: availableCount > 0
-                ? TextButton(
-                    onPressed: () => setState(() {
-                      for (final e in items) {
-                        if (!_isEquipmentAlreadyAdded(e) &&
-                            !_isEquipmentSelected(e)) {
-                          _selectedEquipment.add(e);
-                        }
-                      }
-                    }),
-                    child: const Text('Alle'),
-                  )
-                : null,
-            children:
-                items.map((e) => _buildEquipmentTile(e)).toList(),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildFlatList(List<EquipmentModel> list) {
-    return ListView.builder(
-      itemCount: list.length,
-      itemBuilder: (_, i) => _buildEquipmentTile(list[i]),
-    );
-  }
-
-  Widget _buildEquipmentTile(EquipmentModel equipment) {
-    final isSelected = _isEquipmentSelected(equipment);
-    final isAlreadyAdded = _isEquipmentAlreadyAdded(equipment);
-
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor:
-            equipment.type == 'Jacke' ? Colors.blue : Colors.amber,
-        child: Icon(
-          equipment.type == 'Jacke'
-              ? Icons.accessibility_new
-              : Icons.airline_seat_legroom_normal,
-          color: Colors.white,
-          size: 18,
-        ),
-      ),
-      title: Text(equipment.article,
-          style: TextStyle(
-              color: isAlreadyAdded ? Colors.grey : null,
-              decoration: isAlreadyAdded
-                  ? TextDecoration.lineThrough
-                  : null)),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('${equipment.owner} · Gr. ${equipment.size}'),
-          if (_canSeeAllStations)
-            Text('Ortswehr: ${equipment.fireStation}',
-                style:
-                    const TextStyle(fontSize: 11, color: Colors.grey)),
-          if (isAlreadyAdded)
-            const Text('Bereits im Einsatz',
-                style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold)),
-        ],
-      ),
-      trailing: isAlreadyAdded
-          ? const Icon(Icons.check, color: Colors.grey)
-          : Checkbox(
-              value: isSelected,
-              onChanged: (_) => _toggleSelection(equipment),
-            ),
-      enabled: !isAlreadyAdded,
-      onTap:
-          isAlreadyAdded ? null : () => _toggleSelection(equipment),
-    );
-  }
-
-  Widget _buildSelectedEquipmentList() {
+  Widget _buildAusgewaehltTab() {
     if (_selectedEquipment.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.inventory_2_outlined,
-                size: 64, color: Colors.grey.shade400),
+            Icon(Icons.nfc, size: 72, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            const Text('Noch keine Ausrüstung ausgewählt',
-                style: TextStyle(color: Colors.grey, fontSize: 16)),
+            Text('Noch nichts ausgewählt',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: Colors.grey.shade500)),
             const SizedBox(height: 8),
-            const Text(
-                'NFC-Tag scannen oder manuell im zweiten Tab auswählen',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey)),
+            Text(
+              'NFC-Tag scannen oder im Tab\n"Hinzufügen" manuell auswählen.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _scanNfc,
+              icon: const Icon(Icons.nfc),
+              label: const Text('Ersten Tag scannen'),
+            ),
           ],
         ),
       );
@@ -858,6 +372,7 @@ class _AddEquipmentToMissionNfcScreenState
     final grouped = _groupByOwnerMap(_selectedEquipment);
 
     return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       itemCount: grouped.length,
       itemBuilder: (_, i) {
         final owner = grouped.keys.elementAt(i);
@@ -869,27 +384,47 @@ class _AddEquipmentToMissionNfcScreenState
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(owner,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 15)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person, size: 16, color: Colors.grey),
+                    const SizedBox(width: 6),
+                    Text(owner,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                    const Spacer(),
+                    Text('${items.length} Stück',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade500)),
+                  ],
+                ),
               ),
+              const Divider(height: 1),
               ...items.map((e) => ListTile(
                     dense: true,
-                    leading: Icon(
-                      e.type == 'Jacke'
-                          ? Icons.accessibility_new
-                          : Icons.airline_seat_legroom_normal,
-                      color: e.type == 'Jacke'
-                          ? Colors.blue
-                          : Colors.amber,
+                    leading: CircleAvatar(
+                      radius: 16,
+                      backgroundColor:
+                          e.type == 'Jacke' ? Colors.blue : Colors.amber,
+                      child: Icon(
+                        e.type == 'Jacke'
+                            ? Icons.accessibility_new
+                            : Icons.airline_seat_legroom_normal,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
-                    title: Text(e.article),
-                    subtitle: Text('Gr. ${e.size}'),
+                    title: Text('${e.article} · Gr. ${e.size}',
+                        style: const TextStyle(fontSize: 13)),
+                    subtitle: _canSeeAllStations
+                        ? Text(e.fireStation,
+                            style: const TextStyle(fontSize: 11))
+                        : null,
                     trailing: IconButton(
-                      icon: const Icon(Icons.remove_circle,
-                          color: Colors.red),
-                      onPressed: () => setState(
-                          () => _selectedEquipment.remove(e)),
+                      icon: const Icon(Icons.remove_circle_outline,
+                          color: Colors.red, size: 20),
+                      onPressed: () =>
+                          setState(() => _selectedEquipment.remove(e)),
+                      tooltip: 'Entfernen',
                     ),
                   )),
             ],
@@ -899,28 +434,234 @@ class _AddEquipmentToMissionNfcScreenState
     );
   }
 
+  // ── Tab: Hinzufügen ───────────────────────────────────────────────────────
+
+  Widget _buildHinzufuegenTab() {
+    return Column(
+      children: [
+        // Suche + Filter-Toggle
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Besitzer, Artikel, NFC-Tag...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton.filled(
+                onPressed: () =>
+                    setState(() => _showFilters = !_showFilters),
+                icon: Icon(_showFilters
+                    ? Icons.filter_list_off
+                    : Icons.filter_list),
+                tooltip: 'Filter',
+              ),
+            ],
+          ),
+        ),
+
+        if (_showFilters) _buildFilterDropdowns(),
+
+        Expanded(
+          child: _allEquipment.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : Builder(builder: (context) {
+                  final stationFiltered = _availableFireStations.isEmpty
+                      ? _allEquipment
+                      : _allEquipment
+                          .where((e) => _availableFireStations
+                              .contains(e.fireStation))
+                          .toList();
+                  final filtered = _applyFilters(stationFiltered);
+
+                  if (filtered.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off,
+                              size: 48, color: Colors.grey.shade400),
+                          const SizedBox(height: 12),
+                          const Text('Keine Ausrüstung gefunden',
+                              style: TextStyle(color: Colors.grey)),
+                          TextButton(
+                              onPressed: _resetFilters,
+                              child: const Text('Filter zurücksetzen')),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final grouped = _groupByOwnerMap(filtered);
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    itemCount: grouped.length,
+                    itemBuilder: (_, i) {
+                      final owner = grouped.keys.elementAt(i);
+                      final items = grouped[owner]!;
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                              child: Text(owner,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14)),
+                            ),
+                            ...items.map((e) => _hinzufuegenTile(e)),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                }),
+        ),
+      ],
+    );
+  }
+
+  Widget _hinzufuegenTile(EquipmentModel e) {
+    final isAlreadyAdded = widget.alreadyAddedEquipmentIds.contains(e.id);
+    final isSelected = _selectedEquipment.any((s) => s.id == e.id);
+
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(
+        radius: 16,
+        backgroundColor:
+            isAlreadyAdded || isSelected ? Colors.grey.shade300 :
+            e.type == 'Jacke' ? Colors.blue : Colors.amber,
+        child: Icon(
+          e.type == 'Jacke'
+              ? Icons.accessibility_new
+              : Icons.airline_seat_legroom_normal,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
+      title: Text('${e.article} · Gr. ${e.size}',
+          style: TextStyle(
+              fontSize: 13,
+              color: isAlreadyAdded ? Colors.grey : null,
+              decoration:
+                  isAlreadyAdded ? TextDecoration.lineThrough : null)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_canSeeAllStations)
+            Text(e.fireStation,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          if (isAlreadyAdded)
+            const Text('Bereits im Einsatz',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold)),
+        ],
+      ),
+      trailing: isAlreadyAdded
+          ? const Icon(Icons.check, color: Colors.grey, size: 18)
+          : isSelected
+              ? Icon(Icons.check_circle,
+                  color: Theme.of(context).colorScheme.primary, size: 22)
+              : const Icon(Icons.add_circle_outline, size: 22),
+      enabled: !isAlreadyAdded,
+      onTap: isAlreadyAdded ? null : () => _toggleSelection(e),
+    );
+  }
+
+  // ── Filter Dropdowns ──────────────────────────────────────────────────────
+
+  Widget _buildFilterDropdowns() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          if (_canSeeAllStations)
+            _filterDropdown(
+              value: _selectedFireStationFilter,
+              items: ['Alle', ..._availableFireStations],
+              onChanged: (v) =>
+                  setState(() => _selectedFireStationFilter = v!),
+            ),
+          _filterDropdown(
+            value: _selectedTypeFilter,
+            items: const ['Alle', 'Jacke', 'Hose'],
+            onChanged: (v) => setState(() => _selectedTypeFilter = v!),
+          ),
+          _filterDropdown(
+            value: _selectedStatusFilter,
+            items: const ['Alle', 'Einsatzbereit', 'Reinigung', 'Reparatur'],
+            onChanged: (v) => setState(() => _selectedStatusFilter = v!),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterDropdown({
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        items: items
+            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+            .toList(),
+        onChanged: onChanged,
+        underline: const SizedBox(),
+        isDense: true,
+      ),
+    );
+  }
+
   // ── Bottom Bar ────────────────────────────────────────────────────────────
 
   Widget _buildBottomBar() {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_selectedEquipment.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('${_selectedEquipment.length} Artikel ausgewählt',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold)),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                     TextButton(
-                        onPressed: () =>
-                            setState(() => _selectedEquipment.clear()),
-                        child: const Text('Alle entfernen')),
+                      onPressed: () =>
+                          setState(() => _selectedEquipment.clear()),
+                      child: const Text('Alle entfernen'),
+                    ),
                   ],
                 ),
               ),
@@ -929,21 +670,18 @@ class _AddEquipmentToMissionNfcScreenState
               child: ElevatedButton(
                 onPressed: _isProcessing || _selectedEquipment.isEmpty
                     ? null
-                    : _saveSelectedEquipment,
+                    : _save,
                 style: ElevatedButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 14)),
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
                 child: _isProcessing
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2))
-                    : Text(
-                        _selectedEquipment.isEmpty
-                            ? 'Ausrüstung auswählen'
-                            : '${_selectedEquipment.length} Artikel zum Einsatz hinzufügen',
-                        style: const TextStyle(fontSize: 15)),
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(_selectedEquipment.isEmpty
+                        ? 'Ausrüstung auswählen'
+                        : '${_selectedEquipment.length} zum Einsatz hinzufügen'),
               ),
             ),
           ],

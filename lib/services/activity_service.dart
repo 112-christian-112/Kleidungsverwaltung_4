@@ -13,18 +13,63 @@ class ActivityService {
 
   // ── Öffentliche API ───────────────────────────────────────────────────────
 
+  /// Stream der letzten [limit] Aktivitäten.
+  ///
+  /// FIX: Vorher wurden alle Quellen ohne Limit per Future.wait geladen.
+  /// Jetzt gilt [limit] pro Quelle — nie mehr als nötig aus Firestore lesen.
   Stream<List<ActivityModel>> getRecentActivities({int limit = 10}) async* {
     try {
       if (_auth.currentUser == null) { yield []; return; }
 
-      // Einmaliger User-Abruf — kein rollenbasiertes Lookup mehr
       final user = await _permissionService.getCurrentUser();
       if (user == null) { yield []; return; }
 
       yield* _buildActivityStream(user: user, limit: limit);
     } catch (e) {
-      print('Fehler getRecentActivities: $e');
+      assert(() { print('Fehler getRecentActivities: $e'); return true; }());
       yield [];
+    }
+  }
+
+  /// Paginierte Aktivitäten — für "Alle anzeigen"-Screens.
+  ///
+  /// [startAfterTimestamp]: letzter Zeitstempel der vorherigen Seite (Cursor).
+  /// Null = erste Seite.
+  Future<List<ActivityModel>> getActivitiesPaginated({
+    required UserModel user,
+    int limit = 20,
+    DateTime? startAfterTimestamp,
+  }) async {
+    try {
+      final bool showAll = user.isAdmin ||
+          user.permissions.visibleFireStations.contains('*');
+
+      final stations = <String>{user.fireStation};
+      if (!showAll) stations.addAll(user.permissions.visibleFireStations);
+
+      final results = await Future.wait([
+        if (showAll || user.permissions.equipmentView)
+          _loadInspectionsAll(limit,
+              startAfter: startAfterTimestamp),
+        if (showAll || user.permissions.equipmentView)
+          _loadHistoryAll(limit,
+              startAfter: startAfterTimestamp),
+        if (showAll || user.permissions.missionView)
+          _loadMissionsAll(limit,
+              startAfter: startAfterTimestamp),
+      ]);
+
+      var all = <ActivityModel>[];
+      for (final r in results) {
+        all.addAll(r);
+      }
+
+      all.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      if (all.length > limit) all = all.sublist(0, limit);
+      return all;
+    } catch (e) {
+      assert(() { print('Fehler getActivitiesPaginated: $e'); return true; }());
+      return [];
     }
   }
 
@@ -38,14 +83,13 @@ class ActivityService {
       final bool showAll = user.isAdmin ||
           user.permissions.visibleFireStations.contains('*');
 
-      // Sichtbare Stationen ermitteln
       final stations = <String>{user.fireStation};
       if (!showAll) stations.addAll(user.permissions.visibleFireStations);
 
       List<ActivityModel> all = [];
 
       if (showAll) {
-        // Admin: alle Quellen direkt abfragen
+        // Admin: alle Quellen parallel abfragen
         final results = await Future.wait([
           if (user.isAdmin || user.permissions.equipmentView)
             _loadInspectionsAll(limit),
@@ -58,7 +102,6 @@ class ActivityService {
           all.addAll(r);
         }
       } else {
-        // User mit eingeschränkten Stationen
         final futures = <Future<List<ActivityModel>>>[];
 
         if (user.permissions.equipmentView) {
@@ -82,26 +125,46 @@ class ActivityService {
 
       yield all;
     } catch (e) {
-      print('Fehler _buildActivityStream: $e');
+      assert(() { print('Fehler _buildActivityStream: $e'); return true; }());
       yield [];
     }
   }
 
   // ── Lade-Methoden ─────────────────────────────────────────────────────────
 
-  Future<List<ActivityModel>> _loadInspectionsAll(int limit) async {
+  /// FIX: [startAfter] ermöglicht Cursor-basierte Pagination.
+  /// FIX: Equipment-Infos werden parallel abgerufen statt sequenziell.
+  Future<List<ActivityModel>> _loadInspectionsAll(
+    int limit, {
+    DateTime? startAfter,
+  }) async {
     try {
-      final snap = await _firestore
+      Query query = _firestore
           .collection('equipment_inspections')
           .orderBy('createdAt', descending: true)
-          .limit(limit)
-          .get();
+          .limit(limit);
+
+      if (startAfter != null) {
+        query = query.startAfter([Timestamp.fromDate(startAfter)]);
+      }
+
+      final snap = await query.get();
+      if (snap.docs.isEmpty) return [];
+
+      // FIX: Equipment-IDs sammeln und alle parallel abrufen
+      final equipmentIds = snap.docs
+          .map((d) => (d.data() as Map<String, dynamic>)['equipmentId'] as String? ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      await _prefetchEquipmentInfos(equipmentIds);
 
       final List<ActivityModel> activities = [];
       for (final doc in snap.docs) {
         try {
-          final data = doc.data();
-          final equipmentId = data['equipmentId'] ?? '';
+          final data = doc.data() as Map<String, dynamic>;
+          final equipmentId = data['equipmentId'] as String? ?? '';
           if (equipmentId.isEmpty) continue;
 
           final equipmentInfo = await _getEquipmentInfo(equipmentId);
@@ -109,79 +172,106 @@ class ActivityService {
             id: doc.id,
             type: ActivityType.inspection,
             title: 'Prüfung durchgeführt',
-            description:
-                '$equipmentInfo — ${_getResultText(data['result'])}',
+            description: '$equipmentInfo — ${_getResultText(data['result'])}',
             timestamp: _parseTimestamp(data['createdAt']),
             icon: Icons.check_circle,
             color: Colors.green,
             relatedId: equipmentId,
             relatedType: 'equipment',
-            performedBy: data['createdBy'] ?? 'Unbekannt',
+            performedBy: data['createdBy'] as String? ?? 'Unbekannt',
           ));
         } catch (_) {}
       }
       return activities;
     } catch (e) {
-      print('Fehler _loadInspectionsAll: $e');
+      assert(() { print('Fehler _loadInspectionsAll: $e'); return true; }());
       return [];
     }
   }
 
-  Future<List<ActivityModel>> _loadHistoryAll(int limit) async {
+  Future<List<ActivityModel>> _loadHistoryAll(
+    int limit, {
+    DateTime? startAfter,
+  }) async {
     try {
-      final snap = await _firestore
+      Query query = _firestore
           .collection('equipment_history')
           .orderBy('timestamp', descending: true)
-          .limit(limit)
-          .get();
+          .limit(limit);
+
+      if (startAfter != null) {
+        query = query.startAfter([Timestamp.fromDate(startAfter)]);
+      }
+
+      final snap = await query.get();
+      if (snap.docs.isEmpty) return [];
+
+      // Parallel prefetch
+      final equipmentIds = snap.docs
+          .map((d) => (d.data() as Map<String, dynamic>)['equipmentId'] as String? ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      await _prefetchEquipmentInfos(equipmentIds);
 
       final List<ActivityModel> activities = [];
       for (final doc in snap.docs) {
         try {
-          final data = doc.data();
-          final equipmentId = data['equipmentId'] ?? '';
+          final data = doc.data() as Map<String, dynamic>;
+          final equipmentId = data['equipmentId'] as String? ?? '';
           if (equipmentId.isEmpty) continue;
 
           final equipmentInfo = await _getEquipmentInfo(equipmentId);
           final details = _getActivityDetails(
-              data['action'] ?? '', data['field'] ?? '', data, equipmentInfo);
+              data['action'] as String? ?? '',
+              data['field'] as String? ?? '',
+              data,
+              equipmentInfo);
 
           activities.add(ActivityModel(
             id: doc.id,
-            type: details['type'],
-            title: details['title'],
-            description: details['description'],
+            type: details['type'] as ActivityType,
+            title: details['title'] as String,
+            description: details['description'] as String,
             timestamp: _parseTimestamp(data['timestamp']),
-            icon: details['icon'],
-            color: details['color'],
+            icon: details['icon'] as IconData,
+            color: details['color'] as Color,
             relatedId: equipmentId,
             relatedType: 'equipment',
-            performedBy: data['performedByName'] ?? 'Unbekannt',
+            performedBy: data['performedByName'] as String? ?? 'Unbekannt',
           ));
         } catch (_) {}
       }
       return activities;
     } catch (e) {
-      print('Fehler _loadHistoryAll: $e');
+      assert(() { print('Fehler _loadHistoryAll: $e'); return true; }());
       return [];
     }
   }
 
-  Future<List<ActivityModel>> _loadMissionsAll(int limit) async {
+  Future<List<ActivityModel>> _loadMissionsAll(
+    int limit, {
+    DateTime? startAfter,
+  }) async {
     try {
-      final snap = await _firestore
+      Query query = _firestore
           .collection('missions')
           .orderBy('createdAt', descending: true)
-          .limit(limit)
-          .get();
+          .limit(limit);
+
+      if (startAfter != null) {
+        query = query.startAfter([Timestamp.fromDate(startAfter)]);
+      }
+
+      final snap = await query.get();
       return _processMissionDocs(snap.docs);
     } catch (e) {
-      print('Fehler _loadMissionsAll: $e');
+      assert(() { print('Fehler _loadMissionsAll: $e'); return true; }());
       return [];
     }
   }
 
-  // Aktivitäten für eine bestimmte Station via Equipment-IDs
   Future<List<ActivityModel>> _loadActivitiesForStation(
       String station, int limit) async {
     try {
@@ -193,12 +283,13 @@ class ActivityService {
       final ids = equipSnap.docs.map((d) => d.id).toList();
       if (ids.isEmpty) return [];
 
+      // Equipment-Infos vorab in Cache laden
+      await _prefetchEquipmentInfos(ids);
+
       final List<ActivityModel> activities = [];
 
-      // In Batches à 10 (Firestore whereIn-Limit)
       for (int i = 0; i < ids.length; i += 10) {
-        final batch = ids.sublist(
-            i, i + 10 > ids.length ? ids.length : i + 10);
+        final batch = ids.sublist(i, (i + 10).clamp(0, ids.length));
 
         try {
           final inspSnap = await _firestore
@@ -210,8 +301,8 @@ class ActivityService {
 
           for (final doc in inspSnap.docs) {
             try {
-              final data = doc.data();
-              final equipmentId = data['equipmentId'] ?? '';
+              final data = doc.data() as Map<String, dynamic>;
+              final equipmentId = data['equipmentId'] as String? ?? '';
               final info = await _getEquipmentInfo(equipmentId);
 
               activities.add(ActivityModel(
@@ -224,7 +315,7 @@ class ActivityService {
                 color: Colors.green,
                 relatedId: equipmentId,
                 relatedType: 'equipment',
-                performedBy: data['createdBy'] ?? 'Unbekannt',
+                performedBy: data['createdBy'] as String? ?? 'Unbekannt',
               ));
             } catch (_) {}
           }
@@ -233,7 +324,7 @@ class ActivityService {
 
       return activities;
     } catch (e) {
-      print('Fehler _loadActivitiesForStation: $e');
+      assert(() { print('Fehler _loadActivitiesForStation: $e'); return true; }());
       return [];
     }
   }
@@ -249,27 +340,26 @@ class ActivityService {
           .get();
       return _processMissionDocs(snap.docs);
     } catch (e) {
-      print('Fehler _loadMissionsForStations: $e');
+      assert(() { print('Fehler _loadMissionsForStations: $e'); return true; }());
       return [];
     }
   }
 
   // ── Hilfsmethoden ─────────────────────────────────────────────────────────
 
-  List<ActivityModel> _processMissionDocs(
-      List<QueryDocumentSnapshot> docs) {
+  List<ActivityModel> _processMissionDocs(List<QueryDocumentSnapshot> docs) {
     final List<ActivityModel> activities = [];
     for (final doc in docs) {
       try {
         final data = doc.data() as Map<String, dynamic>;
-        final type = data['type'] ?? '';
+        final type = data['type'] as String? ?? '';
 
         final typeMap = {
-          'fire': ('Brandeinsatz', Icons.local_fire_department, Colors.red),
-          'technical': ('Technische Hilfeleistung', Icons.build, Colors.blue),
-          'hazmat': ('Gefahrguteinsatz', Icons.dangerous, Colors.orange),
-          'water': ('Wassereinsatz', Icons.water, Colors.lightBlue),
-          'training': ('Übung', Icons.school, Colors.green),
+          'fire':     ('Brandeinsatz',           Icons.local_fire_department, Colors.red),
+          'technical':('Technische Hilfeleistung',Icons.build,                Colors.blue),
+          'hazmat':   ('Gefahrguteinsatz',        Icons.dangerous,            Colors.orange),
+          'water':    ('Wassereinsatz',            Icons.water,                Colors.lightBlue),
+          'training': ('Übung',                   Icons.school,               Colors.green),
         };
 
         final (typeText, icon, color) =
@@ -286,37 +376,53 @@ class ActivityService {
           color: color,
           relatedId: doc.id,
           relatedType: 'mission',
-          performedBy: data['createdBy'] ?? 'Unbekannt',
+          performedBy: data['createdBy'] as String? ?? 'Unbekannt',
         ));
       } catch (_) {}
     }
     return activities;
   }
 
-  // Equipment-Info aus Cache oder Firestore
+  // ── Equipment-Cache ────────────────────────────────────────────────────────
+
   final Map<String, String> _equipmentCache = {};
 
   void clearCache() => _equipmentCache.clear();
+
+  /// FIX: Alle IDs die noch nicht im Cache sind parallel fetchen.
+  /// Vorher: sequenzielle await-Aufrufe pro Item = N serielle Firestore-Reads.
+  /// Jetzt: alle uncached IDs in einem Future.wait → 1 Runde statt N.
+  Future<void> _prefetchEquipmentInfos(List<String> ids) async {
+    final uncached = ids.where((id) => !_equipmentCache.containsKey(id)).toList();
+    if (uncached.isEmpty) return;
+
+    await Future.wait(uncached.map(_fetchAndCacheEquipmentInfo));
+  }
+
+  Future<void> _fetchAndCacheEquipmentInfo(String equipmentId) async {
+    try {
+      final doc = await _firestore.collection('equipment').doc(equipmentId).get();
+      if (!doc.exists) {
+        _equipmentCache[equipmentId] = 'Unbekannte Ausrüstung';
+        return;
+      }
+      final data = doc.data()!;
+      _equipmentCache[equipmentId] =
+          '${data['article'] ?? 'Unbekannt'} (${data['owner'] ?? 'Unbekannt'})';
+    } catch (_) {
+      _equipmentCache[equipmentId] = 'Unbekannte Ausrüstung';
+    }
+  }
 
   Future<String> _getEquipmentInfo(String equipmentId) async {
     if (_equipmentCache.containsKey(equipmentId)) {
       return _equipmentCache[equipmentId]!;
     }
-    try {
-      final doc = await _firestore
-          .collection('equipment')
-          .doc(equipmentId)
-          .get();
-      if (!doc.exists) return 'Unbekannte Ausrüstung';
-      final data = doc.data()!;
-      final info =
-          '${data['article'] ?? 'Unbekannt'} (${data['owner'] ?? 'Unbekannt'})';
-      _equipmentCache[equipmentId] = info;
-      return info;
-    } catch (e) {
-      return 'Unbekannte Ausrüstung';
-    }
+    await _fetchAndCacheEquipmentInfo(equipmentId);
+    return _equipmentCache[equipmentId] ?? 'Unbekannte Ausrüstung';
   }
+
+  // ── Detail-Mapping ────────────────────────────────────────────────────────
 
   Map<String, dynamic> _getActivityDetails(String action, String field,
       Map<String, dynamic> data, String equipmentInfo) {
@@ -367,14 +473,10 @@ class ActivityService {
 
   String _getResultText(dynamic result) {
     switch (result?.toString()) {
-      case 'passed':
-        return 'Bestanden ✓';
-      case 'conditionalPass':
-        return 'Bedingt bestanden ⚠';
-      case 'failed':
-        return 'Durchgefallen ✗';
-      default:
-        return result?.toString() ?? 'Unbekannt';
+      case 'passed':        return 'Bestanden ✓';
+      case 'conditionalPass': return 'Bedingt bestanden ⚠';
+      case 'failed':        return 'Durchgefallen ✗';
+      default: return result?.toString() ?? 'Unbekannt';
     }
   }
 }

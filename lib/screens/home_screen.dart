@@ -1,8 +1,6 @@
 // screens/home_screen.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import '../Lists/fire_stations.dart';
 import '../models/equipment_model.dart';
 import '../models/mission_model.dart';
@@ -36,19 +34,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final PermissionService _permissionService = PermissionService();
 
   UpdateInfo? _updateInfo;
-
-  // Einmal laden — Quelle der Wahrheit
   UserModel? _currentUser;
   bool _isLoading = true;
 
-  // Statistiken
   int _overdueCount = 0;
   int _cleaningCount = 0;
   int _repairCount = 0;
   int _totalEquipment = 0;
   int _recentMissionsCount = 0;
 
-  // Berechtigungen aus UserModel
   bool get _canAddMission =>
       _currentUser?.isAdmin == true ||
       _currentUser?.permissions.missionAdd == true;
@@ -63,7 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadAll();
   }
 
-
+  // ── Daten laden ───────────────────────────────────────────────────────────
 
   Future<void> _loadAll() async {
     setState(() => _isLoading = true);
@@ -74,48 +68,35 @@ class _HomeScreenState extends State<HomeScreen> {
         await _loadStatistics(user);
       }
     } catch (e) {
-      print('HomeScreen._loadAll: $e');
+      assert(() {
+        // ignore: avoid_print
+        print('HomeScreen._loadAll: $e');
+        return true;
+      }());
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
 
-    // ── DEBUG: Update-Check mit Logs ─────────────────────────────────────────
-    print('[UPDATE] Starte Update-Check...');
+    // FIX: Update-Check ohne Debug-Logs — stille Hintergrundprüfung.
+    // Vorher: 7x print('[UPDATE]...') wurden in Produktion ausgegeben.
     try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      print('[UPDATE] App-Version: ${packageInfo.version}');
-      print('[UPDATE] Prüfe URL: $kVersionUrl');
-
-      final response = await http
-          .get(Uri.parse(kVersionUrl))
-          .timeout(const Duration(seconds: 8));
-
-      print('[UPDATE] HTTP Status: ${response.statusCode}');
-      print('[UPDATE] Response: ${response.body}');
-
       final updateInfo = await UpdateService.checkForUpdate();
-      print('[UPDATE] UpdateInfo: ${updateInfo?.latestVersion ??
-          'null (kein Update)'}');
-
       if (mounted && updateInfo != null) {
         setState(() => _updateInfo = updateInfo);
-        print('[UPDATE] State gesetzt, Icon sollte erscheinen');
       }
-    } catch (e) {
-      print('[UPDATE] Fehler: $e');
+    } catch (_) {
+      // Nicht kritisch — App funktioniert ohne Update-Check weiter
     }
   }
+
   Future<void> _loadStatistics(UserModel? user) async {
     if (user == null) return;
     try {
       final now = DateTime.now();
       final oneMonthAgo = DateTime(now.year, now.month - 1, now.day);
 
-      // Ausrüstung laden
       final equipment =
           await _equipmentService.getEquipmentByUserAccess().first;
-
-      // Einsätze laden
       final missions =
           await _missionService.getMissionsForCurrentUser(user).first;
 
@@ -139,7 +120,11 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      print('HomeScreen._loadStatistics: $e');
+      assert(() {
+        // ignore: avoid_print
+        print('HomeScreen._loadStatistics: $e');
+        return true;
+      }());
     }
   }
 
@@ -151,7 +136,6 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Einsatzkleidung'),
         actions: [
-          // Update-Badge – nur anzeigen wenn Update verfügbar
           if (_updateInfo != null)
             Stack(
               alignment: Alignment.center,
@@ -178,12 +162,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async { await _authService.signOut(); },
+            onPressed: () async => _authService.signOut(),
             tooltip: 'Abmelden',
           ),
         ],
       ),
-
       drawer: const AppNavigationDrawer(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -194,17 +177,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Begrüßungs-Header ──────────────────────────────────
                     _buildHeader(),
-
                     const SizedBox(height: 16),
-
-                    // ── NFC-Scan — prominent in der Mitte ─────────────────
                     _buildNfcHero(),
-
                     const SizedBox(height: 20),
-
-                    // ── Statistiken ────────────────────────────────────────
                     _buildSectionTitle('Übersicht', onMore: () {
                       Navigator.push(
                           context,
@@ -212,16 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               builder: (_) => const EquipmentStatusScreen()));
                     }),
                     _buildStatisticsRow(),
-
                     const SizedBox(height: 20),
-
-                    // ── Schnellzugriff ─────────────────────────────────────
                     _buildSectionTitle('Schnellzugriff'),
                     _buildQuickActions(),
-
                     const SizedBox(height: 20),
-
-                    // ── Aktivitäten ────────────────────────────────────────
                     _buildSectionTitle('Letzte Aktivitäten', onMore: () {
                       Navigator.pushNamed(context, '/all-activities');
                     }),
@@ -229,7 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: EdgeInsets.symmetric(horizontal: 16),
                       child: RecentActivitiesWidget(limit: 3),
                     ),
-
                     const SizedBox(height: 32),
                   ],
                 ),
@@ -267,7 +236,6 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
       child: Row(
         children: [
-          // Avatar
           CircleAvatar(
             radius: 32,
             backgroundColor: Colors.white.withOpacity(0.9),
@@ -281,16 +249,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(width: 16),
-
-          // Begrüßung
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   '$greeting,',
-                  style: const TextStyle(
-                      fontSize: 14, color: Colors.white70),
+                  style: const TextStyle(fontSize: 14, color: Colors.white70),
                 ),
                 Text(
                   name.isNotEmpty ? name : 'Willkommen',
@@ -318,15 +283,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-
-          // Datum
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
                 DateFormat('EEE', 'de_DE').format(DateTime.now()),
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.white60),
+                style: const TextStyle(fontSize: 12, color: Colors.white60),
               ),
               Text(
                 DateFormat('dd. MMM', 'de_DE').format(DateTime.now()),
@@ -377,7 +339,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: Row(
             children: [
-              // Animiertes NFC-Icon
               Container(
                 width: 60,
                 height: 60,
@@ -388,8 +349,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: const Icon(Icons.nfc, color: Colors.white, size: 32),
               ),
               const SizedBox(width: 20),
-
-              // Text
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,8 +372,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-
-              // Pfeil
               Icon(Icons.arrow_forward_ios,
                   color: Colors.white.withOpacity(0.7), size: 18),
             ],
@@ -461,7 +418,8 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.local_laundry_service,
               color: _cleaningCount > 0 ? Colors.blue : Colors.grey,
               onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const EquipmentStatusScreen())),
+                  MaterialPageRoute(
+                      builder: (_) => const EquipmentStatusScreen())),
             ),
           ),
           const SizedBox(width: 10),
@@ -491,8 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     return Card(
       elevation: 2,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
@@ -508,22 +465,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
-                  color: value > 0 && (label == 'Überfällig')
+                  color: value > 0 && label == 'Überfällig'
                       ? Colors.red
                       : color,
                 ),
               ),
               Text(
                 label,
-                style:
-                    TextStyle(fontSize: 11, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
               if (subtitle != null)
                 Text(
                   subtitle,
-                  style:
-                      TextStyle(fontSize: 10, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
                 ),
             ],
           ),
@@ -535,7 +490,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Schnellzugriff ────────────────────────────────────────────────────────
 
   Widget _buildQuickActions() {
-    // Aktionen dynamisch nach Berechtigungen aufbauen
     final actions = <_QuickAction>[
       _QuickAction(
         label: 'Einsatzliste',
@@ -604,8 +558,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildActionTile(_QuickAction action) {
     return Card(
       elevation: 2,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: action.onTap,
         borderRadius: BorderRadius.circular(12),
@@ -630,7 +583,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: const TextStyle(
                     fontSize: 11, fontWeight: FontWeight.w600),
                 maxLines: 2,
-                  overflow: TextOverflow.ellipsis
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -639,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Hilfsmethode ─────────────────────────────────────────────────────────
+  // ── Abschnitts-Titel ──────────────────────────────────────────────────────
 
   Widget _buildSectionTitle(String title, {VoidCallback? onMore}) {
     return Padding(
@@ -650,15 +603,12 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(
             title,
             style: const TextStyle(
-                fontSize: 17, fontWeight: FontWeight.bold),
+                fontSize: 16, fontWeight: FontWeight.bold),
           ),
           if (onMore != null)
             TextButton(
               onPressed: onMore,
-              style: TextButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8)),
-              child: const Text('Mehr', style: TextStyle(fontSize: 13)),
+              child: const Text('Alle anzeigen'),
             ),
         ],
       ),
@@ -666,16 +616,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ── Daten-Klasse für Quick Actions ────────────────────────────────────────────
+// ── Hilfsklasse ───────────────────────────────────────────────────────────────
 
 class _QuickAction {
   final String label;
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
-  const _QuickAction(
-      {required this.label,
-      required this.icon,
-      required this.color,
-      required this.onTap});
+
+  const _QuickAction({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
 }
