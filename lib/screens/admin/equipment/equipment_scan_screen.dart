@@ -2,7 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../models/equipment_model.dart';
+import '../../../models/user_models.dart';
 import '../../../services/equipment_service.dart';
+import '../../../services/permission_service.dart';
 import '../../../widgets/nfc_scan_sheet.dart';
 import 'barcode_scanner_screen.dart';
 import 'equipment_detail_screen.dart';
@@ -18,8 +20,10 @@ class EquipmentScanScreen extends StatefulWidget {
 
 class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
   final EquipmentService _equipmentService = EquipmentService();
+  final PermissionService _permissionService = PermissionService();
   final TextEditingController _searchController = TextEditingController();
 
+  UserModel? _currentUser;
   bool _isLoading = false;
   String _searchQuery = '';
   EquipmentModel? _foundEquipment;
@@ -28,9 +32,44 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
   EquipmentModel? _lastInspected;
 
   @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final user = await _permissionService.getCurrentUser();
+    if (mounted) setState(() => _currentUser = user);
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  // ── Zugriffs-Check ───────────────────────────────────────────────────────
+
+  bool _canAccess(EquipmentModel e) {
+    final u = _currentUser;
+    if (u == null) return false;
+    return u.canSeeFireStation(e.fireStation);
+  }
+
+  /// Zentrale Methode nach jedem Scan/Suche.
+  /// Prüft Zugriffsrecht bevor Equipment angezeigt wird.
+  void _handleFoundEquipment(EquipmentModel e) {
+    if (_canAccess(e)) {
+      setState(() { _foundEquipment = e; _isLoading = false; });
+    } else {
+      setState(() {
+        _isLoading = false;
+        _foundEquipment = null;
+        _errorMessage =
+            'Dieses Kleidungsstück gehört ${e.owner} '
+            '(Ortswehr ${e.fireStation}) — kein Zugriff.';
+      });
+    }
   }
 
   void _prueftagStarten() {
@@ -88,7 +127,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     try {
       final e = await _equipmentService.getEquipmentByNfcTag(nfcTag);
       if (e != null) {
-        setState(() { _isLoading = false; _foundEquipment = e; });
+        _handleFoundEquipment(e);
       } else {
         await _searchByPartialMatch(nfcTag);
       }
@@ -102,7 +141,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
     try {
       final e = await _equipmentService.getEquipmentByBarcode(barcode);
       if (e != null) {
-        setState(() { _isLoading = false; _foundEquipment = e; });
+        _handleFoundEquipment(e);
       } else {
         await _searchByPartialMatch(barcode);
       }
@@ -121,7 +160,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
       var e = await _equipmentService.getEquipmentByNfcTag(_searchQuery);
       e ??= await _equipmentService.getEquipmentByBarcode(_searchQuery);
       if (e != null) {
-        setState(() { _isLoading = false; _foundEquipment = e; });
+        _handleFoundEquipment(e);
       } else {
         await _searchByPartialMatch(_searchQuery);
       }
@@ -133,12 +172,24 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
   Future<void> _searchByPartialMatch(String query) async {
     try {
       final results = await _equipmentService.searchEquipmentByPartialTagOrBarcode(query);
+      // Nur zugängliche Kleidung anzeigen
+      final accessible = results.where(_canAccess).toList();
+      final hiddenCount = results.length - accessible.length;
       setState(() {
         _isLoading = false;
-        if (results.length == 1) {
-          _foundEquipment = results.first;
-        } else if (results.isNotEmpty) {
-          _searchResults = results;
+        if (accessible.length == 1) {
+          _foundEquipment = accessible.first;
+        } else if (accessible.isNotEmpty) {
+          _searchResults = accessible;
+          if (hiddenCount > 0) {
+            _errorMessage =
+                '$hiddenCount Ergebnis${hiddenCount == 1 ? '' : 'se'} '
+                'aus anderen Ortswehren ausgeblendet.';
+          }
+        } else if (hiddenCount > 0) {
+          _errorMessage =
+              'Gefundene Kleidung gehört zu einer anderen Ortswehr '
+              '— kein Zugriff.';
         } else {
           _errorMessage = 'Keine Einsatzkleidung mit diesem Code gefunden';
         }
@@ -405,8 +456,7 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                               color: EquipmentStatus.getStatusColor(
                                   e.status),
                             ),
-                            onTap: () =>
-                                setState(() => _foundEquipment = e),
+                            onTap: () => _handleFoundEquipment(e),
                           ),
                         )),
                   ],
@@ -462,6 +512,10 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
                           style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold)),
+                      Text(equipment.owner,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500)),
                       Text('Gr. ${equipment.size}',
                           style: TextStyle(
                               color: Colors.grey.shade600)),
@@ -493,6 +547,33 @@ class _EquipmentScanScreenState extends State<EquipmentScanScreen> {
               ],
             ),
             const Divider(height: 24),
+            // Fremd-Wehr-Hinweis für Admins die auf fremde Kleidung stoßen
+            if (_currentUser != null &&
+                !_currentUser!.canSeeFireStation(equipment.fireStation)) ...[
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade300),
+                ),
+                child: Row(children: [
+                  Icon(Icons.swap_horiz,
+                      color: Colors.amber.shade800, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Gehört zu: ${equipment.owner}  ·  Heimatwehr: ${equipment.fireStation}',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.amber.shade900),
+                    ),
+                  ),
+                ]),
+              ),
+            ],
             _infoRow('Besitzer', equipment.owner),
             _infoRow('Ortsfeuerwehr', equipment.fireStation),
             _infoRow('NFC-Tag', equipment.nfcTag, icon: Icons.nfc),

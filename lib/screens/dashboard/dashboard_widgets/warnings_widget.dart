@@ -18,6 +18,7 @@ class WarningsWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final EquipmentService equipmentService = EquipmentService();
     final now = DateTime.now();
+    final soon = DateTime(now.year, now.month, now.day + 30);
 
     return StreamBuilder<List<EquipmentModel>>(
       stream: isAdmin
@@ -26,86 +27,73 @@ class WarningsWidget extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const SizedBox(
-            height: 100,
-            child: Center(child: CircularProgressIndicator()),
-          );
+              height: 80, child: Center(child: CircularProgressIndicator()));
         }
-
         if (snapshot.hasError) {
-          return SizedBox(
-            height: 100,
-            child: Center(
-              child: Text(
-                'Fehler beim Laden der Warnungen: ${snapshot.error}',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          );
+          return _errorCard(context, snapshot.error.toString());
         }
 
-        final equipmentList = snapshot.data ?? [];
+        final list = snapshot.data ?? [];
 
-        // Warnungen berechnen
-        final overdueInspections = equipmentList
-            .where((item) => item.checkDate.isBefore(now))
+        final overdue = list
+            .where((e) => e.checkDate.isBefore(now))
             .toList()
           ..sort((a, b) => a.checkDate.compareTo(b.checkDate));
 
-        final upcomingInspections = equipmentList
-            .where((item) =>
-        item.checkDate.isAfter(now) &&
-            item.checkDate.isBefore(DateTime(now.year, now.month, now.day + 30)))
+        final upcoming = list
+            .where((e) => e.checkDate.isAfter(now) && e.checkDate.isBefore(soon))
             .toList()
           ..sort((a, b) => a.checkDate.compareTo(b.checkDate));
 
-        final nonReadyItems = equipmentList
-            .where((item) => item.status != EquipmentStatus.ready)
+        final notReady = list
+            .where((e) => e.status != EquipmentStatus.ready)
             .toList();
 
-        if (overdueInspections.isEmpty && upcomingInspections.isEmpty && nonReadyItems.isEmpty) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Center(
-                child: Text('Keine Warnungen vorhanden'),
-              ),
-            ),
-          );
+        if (overdue.isEmpty && upcoming.isEmpty && notReady.isEmpty) {
+          return _emptyCard(context);
         }
 
         return Column(
           children: [
-            if (overdueInspections.isNotEmpty)
-              _buildWarningCard(
-                context,
-                'Überfällige Prüfungen',
-                'Die folgenden Artikel haben überfällige Prüfungen und sollten umgehend geprüft werden:',
-                overdueInspections,
-                Colors.red,
-                Icons.warning,
+            if (overdue.isNotEmpty)
+              _warningSection(
+                context: context,
+                title: 'Überfällige Prüfungen',
+                count: overdue.length,
+                icon: Icons.warning_amber_rounded,
+                color: Theme.of(context).colorScheme.error,
+                items: overdue,
+                trailingBuilder: (e) =>
+                    DateFormat('dd.MM.yy').format(e.checkDate),
+                subtitleBuilder: (e) => e.owner,
               ),
 
-            if (upcomingInspections.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _buildWarningCard(
-                context,
-                'Anstehende Prüfungen',
-                'Die folgenden Artikel müssen in den nächsten 30 Tagen geprüft werden:',
-                upcomingInspections,
-                Colors.amber,
-                Icons.event_note,
+            if (upcoming.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _warningSection(
+                context: context,
+                title: 'Bald fällig (30 Tage)',
+                count: upcoming.length,
+                icon: Icons.event_outlined,
+                color: Colors.orange,
+                items: upcoming,
+                trailingBuilder: (e) =>
+                    DateFormat('dd.MM.yy').format(e.checkDate),
+                subtitleBuilder: (e) => e.owner,
               ),
             ],
 
-            if (nonReadyItems.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _buildWarningCard(
-                context,
-                'Nicht einsatzbereite Ausrüstung',
-                'Die folgenden Artikel sind aktuell nicht einsatzbereit:',
-                nonReadyItems,
-                Colors.blue,
-                Icons.handyman,
+            if (notReady.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _warningSection(
+                context: context,
+                title: 'Nicht einsatzbereit',
+                count: notReady.length,
+                icon: Icons.handyman_outlined,
+                color: Colors.blue,
+                items: notReady,
+                trailingBuilder: (e) => e.status,
+                subtitleBuilder: (e) => e.owner,
               ),
             ],
           ],
@@ -114,71 +102,198 @@ class WarningsWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildWarningCard(
-      BuildContext context,
-      String title,
-      String subtitle,
-      List<EquipmentModel> items,
-      Color color,
-      IconData icon,
-      ) {
+  // ── Kachel-Variante: kompakter Header + max 3 Zeilen ─────────────────────
+
+  Widget _warningSection({
+    required BuildContext context,
+    required String title,
+    required int count,
+    required IconData icon,
+    required Color color,
+    required List<EquipmentModel> items,
+    required String Function(EquipmentModel) trailingBuilder,
+    required String Function(EquipmentModel) subtitleBuilder,
+  }) {
+    final cs     = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shown  = items.take(3).toList();
+
     return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      elevation: isDark ? 0 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isDark
+            ? BorderSide(color: cs.outlineVariant)
+            : BorderSide(color: color.withOpacity(0.25), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ──────────────────────────────────────────────────────
+          Container(
+            decoration: BoxDecoration(
+              color: color.withOpacity(isDark ? 0.18 : 0.08),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
               children: [
-              Row(
-              children: [
-              Icon(icon, color: color),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: color,
+                Icon(icon, color: color, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
           ),
+
+          // ── Einträge ─────────────────────────────────────────────────────
+          ...shown.map((e) => _equipmentRow(
+                context: context,
+                equipment: e,
+                trailing: trailingBuilder(e),
+                subtitle: subtitleBuilder(e),
+                color: color,
+              )),
+
+          // ── „… weitere" ──────────────────────────────────────────────────
+          if (count > 3)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+              child: Text(
+                '+ ${count - 3} weitere',
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
+            )
+          else
+            const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+
+  Widget _equipmentRow({
+    required BuildContext context,
+    required EquipmentModel equipment,
+    required String trailing,
+    required String subtitle,
+    required Color color,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              equipment.type == 'Jacke'
+                  ? Icons.accessibility_new
+                  : Icons.airline_seat_legroom_normal,
+              color: color,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  equipment.article,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: cs.onSurface),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            trailing,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cs.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_outline,
+                color: Colors.green.shade400, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              'Keine Warnungen — alles in Ordnung',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
+            ),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(subtitle),
-        const SizedBox(height: 12),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: items.length > 3 ? 3 : items.length,
-          itemBuilder: (context, index) {
-            final item = items[index];
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                item.article,
-                style: const TextStyle(fontSize: 14),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                title == 'Nicht einsatzbereite Ausrüstung'
-                    ? 'Status: ${item.status} | Besitzer: ${item.owner}'
-                    : 'Prüfdatum: ${DateFormat('dd.MM.yyyy').format(item.checkDate)} | Besitzer: ${item.owner}',
-                style: const TextStyle(fontSize: 12),
-              ),
-              trailing: Icon(
-                title == 'Überfällige Prüfungen'
-                    ? Icons.priority_high
-                    : (title == 'Anstehende Prüfungen' ? Icons.event : Icons.info),
-                color: color,
-              ),
-            );
-          },
-        )
-
-    ]
-    )
-    )
+      ),
     );
+  }
 
+  Widget _errorCard(BuildContext context, String error) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cs.error.withOpacity(0.4)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Fehler: $error',
+            style: TextStyle(color: cs.error, fontSize: 13)),
+      ),
+    );
   }
 }

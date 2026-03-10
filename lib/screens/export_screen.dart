@@ -38,6 +38,7 @@ class _ExportScreenState extends State<ExportScreen>
   List<EquipmentInspectionModel> _allInspections = [];
   Map<String, EquipmentModel> _equipmentById = {};
   bool _isLoading = true;
+  bool _isExporting = false; // Guard: verhindert doppelten Dialog-Aufruf
 
   // ── Pro-Tab eigene Filter ─────────────────────────────────────────────────
 
@@ -139,6 +140,20 @@ class _ExportScreenState extends State<ExportScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  /// Wrapper für alle Export-Aufrufe.
+  /// Verhindert mit [_isExporting] dass ein zweiter Dialog geöffnet wird
+  /// während der erste noch läuft (PDF-Generierung + BottomSheet).
+  Future<void> _runExport(Future<void> Function(BuildContext ctx) fn) async {
+    if (_isExporting) return;
+    if (!mounted) return;
+    setState(() => _isExporting = true);
+    try {
+      await fn(context);
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
   }
 
   Future<void> _loadAll() async {
@@ -245,12 +260,12 @@ class _ExportScreenState extends State<ExportScreen>
         statusColor: EquipmentStatus.getStatusColor(e.status),
         statusIcon: EquipmentStatus.getStatusIcon(e.status),
       )).toList(),
-      onExcel: () => ExportService.exportToExcel(
-          context, filtered, title: _equipmentTitle()),
-      onPdf: () => ExportService.exportEquipmentPdf(
-          context, filtered,
+      onExcel: () => _runExport((ctx) => ExportService.exportToExcel(
+          ctx, filtered, title: _equipmentTitle())),
+      onPdf: () => _runExport((ctx) => ExportService.exportEquipmentPdf(
+          ctx, filtered,
           title: _equipmentTitle(),
-          withStatsSummary: _eqWithStats),
+          withStatsSummary: _eqWithStats)),
     );
   }
 
@@ -362,15 +377,15 @@ class _ExportScreenState extends State<ExportScreen>
         statusColor: Colors.deepOrange,
         statusIcon: _missionIcon(m.type),
       )).toList(),
-      onExcel: () => ExportService.exportMissionsExcel(
-          context, filtered,
+      onExcel: () => _runExport((ctx) => ExportService.exportMissionsExcel(
+          ctx, filtered,
           equipmentById: _equipmentById,
-          title: _missionTitle()),
-      onPdf: () => ExportService.exportMissionsPdf(
-          context, filtered,
+          title: _missionTitle())),
+      onPdf: () => _runExport((ctx) => ExportService.exportMissionsPdf(
+          ctx, filtered,
           equipmentById: _equipmentById,
           title: _missionTitle(),
-          withStatsSummary: _mWithStats),
+          withStatsSummary: _mWithStats)),
     );
   }
 
@@ -496,15 +511,15 @@ class _ExportScreenState extends State<ExportScreen>
           statusIcon: Icons.fact_check,
         );
       }).toList(),
-      onExcel: () => ExportService.exportInspectionsExcel(
-          context, filtered,
+      onExcel: () => _runExport((ctx) => ExportService.exportInspectionsExcel(
+          ctx, filtered,
           title: _inspectionTitle(),
-          equipmentById: _equipmentById),
-      onPdf: () => ExportService.exportInspectionsPdf(
-          context, filtered,
+          equipmentById: _equipmentById)),
+      onPdf: () => _runExport((ctx) => ExportService.exportInspectionsPdf(
+          ctx, filtered,
           title: _inspectionTitle(),
           withStatsSummary: _iWithStats,
-          equipmentById: _equipmentById),
+          equipmentById: _equipmentById)),
     );
   }
 
@@ -600,23 +615,23 @@ class _ExportScreenState extends State<ExportScreen>
             expanded: _dueExpanded,
             onToggle: () => setState(() => _dueExpanded = !_dueExpanded),
             controls: _dueExpanded ? _buildDueControls(isDark, cs) : null,
-            onExcel: () {
+            onExcel: () => _runExport((ctx) async {
               final due = _getDueItems();
               if (due.isEmpty) { _snackEmpty(); return; }
-              ExportService.exportDueInspectionsPdf(
-                context, due, _equipmentById,
+              await ExportService.exportDueInspectionsPdf(
+                ctx, due, _equipmentById,
                 title: 'Prüfungs-Fälligkeit',
                 asExcel: true,
               );
-            },
-            onPdf: () {
+            }),
+            onPdf: () => _runExport((ctx) async {
               final due = _getDueItems();
               if (due.isEmpty) { _snackEmpty(); return; }
-              ExportService.exportDueInspectionsPdf(
-                context, due, _equipmentById,
-                title: 'Prüfungs-Fälligkeit – nächste $_dueDays Tage',
+              await ExportService.exportDueInspectionsPdf(
+                ctx, due, _equipmentById,
+                title: 'Prüfungs-Fälligkeit – nächste \$_dueDays Tage',
               );
-            },
+            }),
             badgeText: () {
               final c = _getDueItems().length;
               return c == 0 ? null : '$c fällig';
@@ -636,12 +651,12 @@ class _ExportScreenState extends State<ExportScreen>
             expanded: _ownerExpanded,
             onToggle: () => setState(() => _ownerExpanded = !_ownerExpanded),
             controls: null,
-            onExcel: () => ExportService.exportOwnerOverviewExcel(
-                context, _allEquipment, _equipmentById,
-                title: 'Besitzer-Übersicht'),
-            onPdf: () => ExportService.exportOwnerOverviewPdf(
-                context, _allEquipment, _equipmentById,
-                title: 'Besitzer-Übersicht'),
+            onExcel: () => _runExport((ctx) => ExportService.exportOwnerOverviewExcel(
+                ctx, _allEquipment, _equipmentById,
+                title: 'Besitzer-Übersicht')),
+            onPdf: () => _runExport((ctx) => ExportService.exportOwnerOverviewPdf(
+                ctx, _allEquipment, _equipmentById,
+                title: 'Besitzer-Übersicht')),
             badgeText: () {
               final owners = _allEquipment.map((e) => e.owner)
                   .where((o) => o.isNotEmpty).toSet().length;
@@ -663,14 +678,14 @@ class _ExportScreenState extends State<ExportScreen>
             onToggle: () => setState(() => _yearlyExpanded = !_yearlyExpanded),
             controls: _yearlyExpanded ? _buildYearlyControls(isDark, cs) : null,
             onExcel: null,
-            onPdf: () => ExportService.exportYearlyReportPdf(
-              context,
+            onPdf: () => _runExport((ctx) => ExportService.exportYearlyReportPdf(
+              ctx,
               equipment:   _allEquipment,
               missions:    _allMissions,
               inspections: _allInspections,
               equipmentById: _equipmentById,
               year: _labelYear,
-            ),
+            )),
             badgeText: '${_labelYear}',
             badgeColor: Colors.teal,
           ),
@@ -688,11 +703,11 @@ class _ExportScreenState extends State<ExportScreen>
             onToggle: () => setState(() => _labelExpanded = !_labelExpanded),
             controls: _labelExpanded ? _buildLabelControls(isDark, cs) : null,
             onExcel: null,
-            onPdf: () => ExportService.exportLabelsPdf(
-              context,
+            onPdf: () => _runExport((ctx) => ExportService.exportLabelsPdf(
+              ctx,
               _allEquipment,
               title: 'Etiketten',
-            ),
+            )),
             badgeText: '${_allEquipment.length} Etiketten',
             badgeColor: Colors.deepPurple,
           ),

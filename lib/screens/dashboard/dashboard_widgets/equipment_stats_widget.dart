@@ -1,6 +1,5 @@
 // screens/dashboard/dashboard_widgets/equipment_stats_widget.dart
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import '../../../models/equipment_model.dart';
 import '../../../services/equipment_service.dart';
 
@@ -24,151 +23,47 @@ class EquipmentStatsWidget extends StatelessWidget {
           : equipmentService.getEquipmentByFireStation(userFireStation),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: SizedBox(
-              height: 200,
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          );
-        }
-
-        if (snapshot.hasError) {
-          return SizedBox(
-            height: 200,
-            child: Center(
-              child: Text(
-                'Fehler beim Laden der Daten: ${snapshot.error}',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          );
-        }
-
-        final equipmentList = snapshot.data ?? [];
-
-        if (equipmentList.isEmpty) {
           return const SizedBox(
-            height: 200,
-            child: Center(
-              child: Text('Keine Einsatzkleidung vorhanden'),
-            ),
-          );
+              height: 120, child: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError) {
+          return _errorCard(context, '${snapshot.error}');
         }
 
-        // Statistiken berechnen
-        final typeStats = _calculateTypeStats(equipmentList);
-        final statusStats = _calculateStatusStats(equipmentList);
-        final stationStats = isAdmin ? _calculateStationStats(equipmentList) : null;
+        final list = snapshot.data ?? [];
+        if (list.isEmpty) {
+          return _emptyCard(context);
+        }
+
+        final typeStats    = _calcBy(list, (e) => e.type);
+        final statusStats  = _calcBy(list, (e) => e.status);
+        final stationStats = isAdmin ? _calcBy(list, (e) => e.fireStation) : null;
+
+        final cs     = Theme.of(context).colorScheme;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
 
         return Column(
           children: [
+            // ── Typ + Status nebeneinander ─────────────────────────────
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  flex: 1,
-                  child: _buildStatCard(
-                    context,
-                    'Nach Typ',
-                    _buildPieChart(typeStats, context),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 1,
-                  child: _buildStatCard(
-                    context,
-                    'Nach Status',
-                    _buildPieChart(statusStats, context, isStatus: true),
-                  ),
-                ),
+                Expanded(child: _distCard(context, 'Nach Typ', typeStats,
+                    (k) => k == 'Jacke'
+                        ? Icons.accessibility_new
+                        : Icons.airline_seat_legroom_normal,
+                    (k) => k == 'Jacke' ? cs.primary : cs.secondary)),
+                const SizedBox(width: 10),
+                Expanded(child: _distCard(context, 'Nach Status', statusStats,
+                    (k) => EquipmentStatus.getStatusIcon(k),
+                    (k) => EquipmentStatus.getStatusColor(k))),
               ],
             ),
-            if (isAdmin && stationStats != null) ...[
-              const SizedBox(height: 16),
-              _buildStatCard(
-                context,
-                'Nach Ortsfeuerwehr',
-                SizedBox(
-                  height: 200,
-                  child: BarChart(
-                    BarChartData(
-                      alignment: BarChartAlignment.spaceAround,
-                      maxY: stationStats.entries
-                          .map((e) => e.value.toDouble())
-                          .fold(0.0, (a, b) => a > b ? a : b) * 1.2,
-                      barTouchData: BarTouchData(enabled: false),
-                      titlesData: FlTitlesData(
-                        show: true,
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            getTitlesWidget: (value, meta) {
-                              if (value < 0 || value >= stationStats.length) {
-                                return const SizedBox.shrink();
-                              }
-                              final stations = stationStats.keys.toList();
-                              final station = stations[value.toInt()];
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: RotatedBox(
-                                  quarterTurns: 1,
-                                  child: Text(
-                                    station,
-                                    style: const TextStyle(fontSize: 10),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        leftTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 30,
-                            getTitlesWidget: (value, meta) {
-                              if (value == 0) {
-                                return const SizedBox.shrink();
-                              }
-                              return Text(
-                                value.toInt().toString(),
-                                style: const TextStyle(fontSize: 10),
-                              );
-                            },
-                          ),
-                        ),
-                        topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                      ),
-                      gridData: const FlGridData(show: false),
-                      borderData: FlBorderData(show: false),
-                      barGroups: List.generate(
-                        stationStats.length,
-                            (index) {
-                          final entry = stationStats.entries.elementAt(index);
-                          return BarChartGroupData(
-                            x: index,
-                            barRods: [
-                              BarChartRodData(
-                                toY: entry.value.toDouble(),
-                                color: Theme.of(context).colorScheme.primary,
-                                width: 20,
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(6),
-                                  topRight: Radius.circular(6),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+
+            // ── Station (nur Admin) ────────────────────────────────────
+            if (stationStats != null) ...[
+              const SizedBox(height: 10),
+              _stationCard(context, stationStats),
             ],
           ],
         );
@@ -176,140 +71,180 @@ class EquipmentStatsWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(BuildContext context, String title, Widget content) {
+  // ── Verteilungs-Karte (Typ / Status) ──────────────────────────────────────
+  Widget _distCard(
+    BuildContext context,
+    String title,
+    Map<String, int> stats,
+    IconData Function(String) iconFn,
+    Color Function(String) colorFn,
+  ) {
+    final cs     = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final total  = stats.values.fold(0, (s, v) => s + v);
+    final sorted = stats.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
     return Card(
-      elevation: 2,
+      elevation: isDark ? 0 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isDark ? BorderSide(color: cs.outlineVariant) : BorderSide.none,
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            content,
+            Text(title,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface)),
+            const SizedBox(height: 12),
+            ...sorted.map((e) {
+              final pct = total > 0 ? e.value / total : 0.0;
+              final color = colorFn(e.key);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(iconFn(e.key), size: 14, color: color),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(e.key,
+                            style: TextStyle(
+                                fontSize: 12, color: cs.onSurface),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      Text('${e.value}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: cs.onSurface)),
+                    ]),
+                    const SizedBox(height: 3),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: pct,
+                        minHeight: 5,
+                        backgroundColor: color.withOpacity(0.12),
+                        valueColor: AlwaysStoppedAnimation(color),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildPieChart(Map<String, int> data, BuildContext context, {bool isStatus = false}) {
-    final totalItems = data.values.fold(0, (sum, item) => sum + item);
-    final List<Color> colors = isStatus
-        ? data.keys.map((key) => EquipmentStatus.getStatusColor(key)).toList()
-        : [
-      Theme.of(context).colorScheme.primary,
-      Theme.of(context).colorScheme.secondary,
-      Theme.of(context).colorScheme.tertiary,
-      Colors.amber,
-      Colors.purple,
-    ];
+  // ── Stationsbalken ─────────────────────────────────────────────────────────
+  Widget _stationCard(BuildContext context, Map<String, int> stats) {
+    final cs     = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sorted = stats.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final max    = sorted.isEmpty ? 1 : sorted.first.value;
 
-    return SizedBox(
-      height: 200,
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: PieChart(
-              PieChartData(
-                sectionsSpace: 2,
-                centerSpaceRadius: 30,
-                sections: List.generate(
-                  data.length,
-                      (index) {
-                    final entry = data.entries.elementAt(index);
-                    final percent = totalItems > 0
-                        ? (entry.value / totalItems * 100).toStringAsFixed(1)
-                        : '0.0';
-
-                    return PieChartSectionData(
-                      color: colors[index % colors.length],
-                      value: entry.value.toDouble(),
-                      title: '$percent%',
-                      radius: 80,
-                      titleStyle: const TextStyle(
+    return Card(
+      elevation: isDark ? 0 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isDark ? BorderSide(color: cs.outlineVariant) : BorderSide.none,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nach Ortswehr',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface)),
+            const SizedBox(height: 12),
+            ...sorted.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                SizedBox(
+                  width: 110,
+                  child: Text(e.key,
+                      style: TextStyle(fontSize: 12, color: cs.onSurface),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: e.value / max,
+                      minHeight: 8,
+                      backgroundColor: cs.primary.withOpacity(0.1),
+                      valueColor: AlwaysStoppedAnimation(cs.primary),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('${e.value}',
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: List.generate(
-                data.length,
-                    (index) {
-                  final entry = data.entries.elementAt(index);
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 12,
-                          height: 12,
-                          color: colors[index % colors.length],
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${entry.key} (${entry.value})',
-                            style: const TextStyle(fontSize: 10),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
+                        color: cs.onSurface)),
+              ]),
+            )),
+          ],
+        ),
       ),
     );
   }
 
-  Map<String, int> _calculateTypeStats(List<EquipmentModel> equipment) {
-    final stats = <String, int>{};
-
-    for (final item in equipment) {
-      stats[item.type] = (stats[item.type] ?? 0) + 1;
-    }
-
-    return stats;
+  Widget _emptyCard(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cs.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Text('Keine Einsatzkleidung vorhanden',
+              style: TextStyle(color: cs.onSurfaceVariant)),
+        ),
+      ),
+    );
   }
 
-  Map<String, int> _calculateStatusStats(List<EquipmentModel> equipment) {
-    final stats = <String, int>{};
-
-    for (final item in equipment) {
-      stats[item.status] = (stats[item.status] ?? 0) + 1;
-    }
-
-    return stats;
+  Widget _errorCard(BuildContext context, String error) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: cs.error.withOpacity(0.4)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Fehler: $error',
+            style: TextStyle(color: cs.error, fontSize: 13)),
+      ),
+    );
   }
 
-  Map<String, int> _calculateStationStats(List<EquipmentModel> equipment) {
-    final stats = <String, int>{};
-
-    for (final item in equipment) {
-      stats[item.fireStation] = (stats[item.fireStation] ?? 0) + 1;
+  Map<String, int> _calcBy(
+      List<EquipmentModel> list, String Function(EquipmentModel) key) {
+    final m = <String, int>{};
+    for (final e in list) {
+      m[key(e)] = (m[key(e)] ?? 0) + 1;
     }
-
-    return stats;
+    return m;
   }
 }

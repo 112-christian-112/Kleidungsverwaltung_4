@@ -266,6 +266,67 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
     }
   }
 
+  /// Statuswechsel mit Prüfpflicht für Nicht-Admins.
+  ///
+  /// Regel: Wenn ein Nicht-Admin die Kleidung von "In der Reinigung" oder
+  /// "In Reparatur" auf "Einsatzbereit" setzen will, muss er zuerst eine
+  /// Prüfung durchführen. Die Prüfung setzt den Status automatisch auf
+  /// "Einsatzbereit" — danach ist kein manueller Statuswechsel nötig.
+  /// Admins können den Status jederzeit direkt ändern.
+  void _handleStatusChange(String newStatus) {
+    final isAdmin = _currentUser?.isAdmin == true;
+    final requiresInspection = !isAdmin &&
+        newStatus == EquipmentStatus.ready &&
+        (_status == EquipmentStatus.cleaning ||
+            _status == EquipmentStatus.repair);
+
+    if (requiresInspection) {
+      _showInspectionRequiredDialog();
+    } else {
+      _updateStatus(newStatus);
+    }
+  }
+
+  void _showInspectionRequiredDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.assignment_turned_in_outlined,
+            size: 40, color: Colors.orange),
+        title: const Text('Prüfung erforderlich'),
+        content: const Text(
+          'Bevor die Kleidung wieder als "Einsatzbereit" markiert werden kann, '
+          'muss eine Prüfung durchgeführt werden.'
+          'Die Prüfung setzt den Status automatisch auf "Einsatzbereit".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Abbrechen'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              final result = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EquipmentInspectionFormScreen(
+                      equipment: widget.equipment),
+                ),
+              );
+              if (result == true && mounted) {
+                setState(() => _status = EquipmentStatus.ready);
+                _loadInspectionData();
+              }
+            },
+            icon: const Icon(Icons.check_circle_outline),
+            label: const Text('Prüfung starten'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showStatusPicker() {
     showModalBottomSheet(
       context: context,
@@ -316,7 +377,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     : null,
                 onTap: () {
                   Navigator.pop(context);
-                  _updateStatus(s);
+                  _handleStatusChange(s);
                 },
               );
             }),
@@ -395,6 +456,14 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── 0. FREMD-WEHR-BANNER ─────────────────────────────
+                  if (_currentUser != null &&
+                      !_currentUser!.canSeeFireStation(widget.equipment.fireStation))
+                    _buildForeignStationBanner(),
+                  if (_currentUser != null &&
+                      !_currentUser!.canSeeFireStation(widget.equipment.fireStation))
+                    const SizedBox(height: 12),
+
                   // ── 1. HERO-HEADER ────────────────────────────────────
                   _buildHeroHeader(cs, isDark),
                   const SizedBox(height: 16),
@@ -1070,6 +1139,49 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
             if (trailing != null) trailing,
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildForeignStationBanner() {
+    final e = widget.equipment;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.shade300),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.swap_horiz, color: Colors.amber.shade800, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Kleidung einer anderen Ortswehr',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amber.shade900,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Besitzer: ${e.owner}  ·  Heimatwehr: ${e.fireStation}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.amber.shade800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

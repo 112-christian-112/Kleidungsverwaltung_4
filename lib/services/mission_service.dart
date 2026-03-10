@@ -357,7 +357,7 @@ class MissionService {
   }
 
   Future<void> deleteMission(String missionId) async {
-    final canDelete = await _permissionService.canEditMissions();
+    final canDelete = await _permissionService.canDeleteMissions();
     if (!canDelete) {
       throw Exception('Keine Berechtigung zum Löschen von Einsätzen');
     }

@@ -101,7 +101,7 @@ class CleaningReceiptPreviewScreen extends StatelessWidget {
           // PDF-Vorschau
           Expanded(
             child: PdfPreview(
-              build: (format) => pdfBytes,
+              build: (format) async => pdfBytes,
               allowPrinting: true,
               allowSharing: kIsWeb ? false : true,
               initialPageFormat: PdfPageFormat.a4,

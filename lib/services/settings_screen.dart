@@ -83,51 +83,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final newPw     = TextEditingController();
     final confirmPw = TextEditingController();
 
+    // Messenger vor dem Dialog extrahieren — context ist nach await ggf. nicht mehr mounted
+    final messenger = ScaffoldMessenger.of(context);
+
     await showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Passwort ändern'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: currentPw,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Aktuelles Passwort'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: newPw,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Neues Passwort'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: confirmPw,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Passwort bestätigen'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (newPw.text == confirmPw.text && newPw.text.isNotEmpty) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Passwort erfolgreich geändert')),
-                );
-              }
-            },
-            child: const Text('Ändern'),
-          ),
-        ],
+      builder: (dialogContext) => _PasswordChangeDialog(
+        currentPw: currentPw,
+        newPw: newPw,
+        confirmPw: confirmPw,
+        authService: _authService,
+        messenger: messenger,
       ),
     );
+
+    currentPw.dispose();
+    newPw.dispose();
+    confirmPw.dispose();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -730,6 +702,147 @@ class _SwitchTile extends StatelessWidget {
           activeColor: cs.primary,
         ),
         if (!isLast) const Divider(height: 1, indent: 4),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PASSWORT ÄNDERN — Dialog als StatefulWidget
+// Wird als eigenes Widget ausgelagert damit setState() den Ladezustand
+// nur innerhalb des Dialogs aktualisiert, nicht den gesamten SettingsScreen.
+// ════════════════════════════════════════════════════════════════════════════
+
+class _PasswordChangeDialog extends StatefulWidget {
+  final TextEditingController currentPw;
+  final TextEditingController newPw;
+  final TextEditingController confirmPw;
+  final AuthService authService;
+  final ScaffoldMessengerState messenger;
+
+  const _PasswordChangeDialog({
+    required this.currentPw,
+    required this.newPw,
+    required this.confirmPw,
+    required this.authService,
+    required this.messenger,
+  });
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  bool _isLoading = false;
+  String _errorMessage = '';
+
+  Future<void> _submit() async {
+    final currentPwText = widget.currentPw.text;
+    final newPwText     = widget.newPw.text;
+    final confirmPwText = widget.confirmPw.text;
+
+    if (currentPwText.isEmpty || newPwText.isEmpty) {
+      setState(() => _errorMessage = 'Bitte alle Felder ausfüllen.');
+      return;
+    }
+    if (newPwText != confirmPwText) {
+      setState(() => _errorMessage = 'Die neuen Passwörter stimmen nicht überein.');
+      return;
+    }
+    if (newPwText.length < 6) {
+      setState(() => _errorMessage = 'Das neue Passwort muss mindestens 6 Zeichen lang sein.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      await widget.authService.changePassword(
+        currentPassword: currentPwText,
+        newPassword: newPwText,
+      );
+
+      if (mounted) Navigator.pop(context);
+      widget.messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Passwort erfolgreich geändert.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on Exception catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading    = false;
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Passwort ändern'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: widget.currentPw,
+            obscureText: true,
+            enabled: !_isLoading,
+            decoration: const InputDecoration(labelText: 'Aktuelles Passwort'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: widget.newPw,
+            obscureText: true,
+            enabled: !_isLoading,
+            decoration: const InputDecoration(labelText: 'Neues Passwort'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: widget.confirmPw,
+            obscureText: true,
+            enabled: !_isLoading,
+            decoration: const InputDecoration(labelText: 'Passwort bestätigen'),
+          ),
+          if (_errorMessage.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Text(
+                _errorMessage,
+                style: TextStyle(color: Colors.red.shade800, fontSize: 13),
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.pop(context),
+          child: const Text('Abbrechen'),
+        ),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _submit,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Ändern'),
+        ),
       ],
     );
   }

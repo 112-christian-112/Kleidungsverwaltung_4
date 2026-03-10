@@ -894,6 +894,7 @@ class ExportService {
 
     await showModalBottomSheet(
       context: context,
+      useRootNavigator: true,   // Android: verhindert dass das Sheet im Scaffold-Stack hängt
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(

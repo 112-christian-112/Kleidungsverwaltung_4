@@ -932,15 +932,32 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
             Text(
                 'Status für ${_selectedEquipmentIds.length} Ausrüstungsgegenstände ändern:'),
             const SizedBox(height: 16),
-            ...EquipmentStatus.values.map((s) => ListTile(
-                  leading: Icon(EquipmentStatus.getStatusIcon(s),
-                      color: EquipmentStatus.getStatusColor(s)),
-                  title: Text(s),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _updateStatusForSelected(s);
-                  },
-                )),
+            ...EquipmentStatus.values.map((s) {
+              final isAdmin = _currentUser?.isAdmin == true;
+              // Nicht-Admins dürfen nicht direkt auf "Einsatzbereit" setzen —
+              // das erfordert eine Prüfung (nur im Einzelitem möglich)
+              final blocked = !isAdmin && s == EquipmentStatus.ready;
+              return ListTile(
+                leading: Icon(EquipmentStatus.getStatusIcon(s),
+                    color: blocked
+                        ? Colors.grey.shade400
+                        : EquipmentStatus.getStatusColor(s)),
+                title: Text(s,
+                    style: TextStyle(
+                        color: blocked ? Colors.grey.shade400 : null)),
+                subtitle: blocked
+                    ? const Text('Prüfung erforderlich — nur im Einzelitem',
+                        style: TextStyle(fontSize: 11))
+                    : null,
+                enabled: !blocked,
+                onTap: blocked
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        _updateStatusForSelected(s);
+                      },
+              );
+            }),
           ],
         ),
         actions: [

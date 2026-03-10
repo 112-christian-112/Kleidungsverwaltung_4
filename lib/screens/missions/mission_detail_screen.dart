@@ -31,17 +31,21 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
   bool _isGeneratingPdf = false;
   MissionModel? _mission;
   List<EquipmentModel> _equipmentList = [];
+  int _hiddenEquipmentCount = 0;
 
   bool get _canEdit =>
       _currentUser?.isAdmin == true ||
-      _currentUser?.permissions.missionEdit == true;
+          _currentUser?.permissions.missionEdit == true;
+
   bool get _canDelete => _currentUser?.isAdmin == true;
+
   bool get _canAddEquipment =>
       _currentUser?.isAdmin == true ||
-      _currentUser?.permissions.equipmentView == true;
+          _currentUser?.permissions.equipmentView == true;
+
   bool get _canSendToCleaning =>
       _currentUser?.isAdmin == true ||
-      _currentUser?.permissions.cleaningCreate == true;
+          _currentUser?.permissions.cleaningCreate == true;
 
   @override
   void initState() {
@@ -58,10 +62,23 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
         _missionService.getEquipmentForMission(widget.missionId),
       ]);
       if (mounted) {
+        final user = results[0] as UserModel?;
+        final allEquip = results[2] as List<EquipmentModel>;
+
+        // Nur Kleidung der eigenen/sichtbaren Stationen anzeigen.
+        // Kleidung anderer Stationen wird als Hinweis gezählt, nicht gelistet.
+        final visibleEquip = allEquip.where((e) {
+          if (user == null) return false;
+          return user.canSeeFireStation(e.fireStation);
+        }).toList();
+
+        final hiddenCount = allEquip.length - visibleEquip.length;
+
         setState(() {
-          _currentUser = results[0] as UserModel?;
+          _currentUser = user;
           _mission = results[1] as MissionModel?;
-          _equipmentList = results[2] as List<EquipmentModel>;
+          _equipmentList = visibleEquip;
+          _hiddenEquipmentCount = hiddenCount;
           _isLoading = false;
         });
       }
@@ -81,10 +98,11 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => AddEquipmentToMissionNfcScreen(
-          missionId: _mission!.id,
-          alreadyAddedEquipmentIds: _mission!.equipmentIds,
-        ),
+        builder: (_) =>
+            AddEquipmentToMissionNfcScreen(
+              missionId: _mission!.id,
+              alreadyAddedEquipmentIds: _mission!.equipmentIds,
+            ),
       ),
     );
     if (result == true) _loadData();
@@ -95,10 +113,11 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MissionSendToCleaningScreen(
-          missionId: _mission!.id,
-          missionName: _mission!.name,
-        ),
+        builder: (_) =>
+            MissionSendToCleaningScreen(
+              missionId: _mission!.id,
+              missionName: _mission!.name,
+            ),
       ),
     );
     _loadData();
@@ -109,13 +128,15 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
     setState(() => _isGeneratingPdf = true);
     try {
       final cleaningEquipment =
-          _equipmentList.where((e) => e.status == EquipmentStatus.cleaning).toList();
+      _equipmentList.where((e) => e.status == EquipmentStatus.cleaning)
+          .toList();
       if (cleaningEquipment.isEmpty) {
         _showSnack('Keine Ausrüstung in der Reinigung', Colors.orange);
         setState(() => _isGeneratingPdf = false);
         return;
       }
-      final pdfBytes = await CleaningReceiptPdfService.generateCleaningReceiptCopy(
+      final pdfBytes = await CleaningReceiptPdfService
+          .generateCleaningReceiptCopy(
         mission: _mission!,
         equipmentList: cleaningEquipment,
       );
@@ -124,12 +145,13 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => CleaningReceiptPreviewScreen(
-              pdfBytes: pdfBytes,
-              mission: _mission!,
-              equipmentList: cleaningEquipment,
-              isRegenerated: true,
-            ),
+            builder: (_) =>
+                CleaningReceiptPreviewScreen(
+                  pdfBytes: pdfBytes,
+                  mission: _mission!,
+                  equipmentList: cleaningEquipment,
+                  isRegenerated: true,
+                ),
           ),
         );
       }
@@ -144,18 +166,21 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
   Future<void> _deleteMission() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Einsatz löschen'),
-        content: const Text('Diese Aktion kann nicht rückgängig gemacht werden.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Abbrechen')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Löschen', style: TextStyle(color: Colors.red))),
-        ],
-      ),
+      builder: (_) =>
+          AlertDialog(
+            title: const Text('Einsatz löschen'),
+            content: const Text(
+                'Diese Aktion kann nicht rückgängig gemacht werden.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Abbrechen')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text(
+                      'Löschen', style: TextStyle(color: Colors.red))),
+            ],
+          ),
     );
     if (confirm != true) return;
     setState(() => _isLoading = true);
@@ -184,23 +209,35 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
 
   IconData _typeIcon(String t) {
     switch (t) {
-      case 'fire': return Icons.local_fire_department;
-      case 'technical': return Icons.build;
-      case 'hazmat': return Icons.dangerous;
-      case 'water': return Icons.water;
-      case 'training': return Icons.school;
-      default: return Icons.assignment;
+      case 'fire':
+        return Icons.local_fire_department;
+      case 'technical':
+        return Icons.build;
+      case 'hazmat':
+        return Icons.dangerous;
+      case 'water':
+        return Icons.water;
+      case 'training':
+        return Icons.school;
+      default:
+        return Icons.assignment;
     }
   }
 
   Color _typeColor(String t) {
     switch (t) {
-      case 'fire': return Colors.red.shade700;
-      case 'technical': return Colors.blue.shade700;
-      case 'hazmat': return Colors.orange.shade700;
-      case 'water': return Colors.lightBlue.shade700;
-      case 'training': return Colors.green.shade700;
-      default: return Colors.grey.shade700;
+      case 'fire':
+        return Colors.red.shade700;
+      case 'technical':
+        return Colors.blue.shade700;
+      case 'hazmat':
+        return Colors.orange.shade700;
+      case 'water':
+        return Colors.lightBlue.shade700;
+      case 'training':
+        return Colors.green.shade700;
+      default:
+        return Colors.grey.shade700;
     }
   }
 
@@ -216,12 +253,19 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
   }
 
   _EquipmentCounts _countTypes(List<EquipmentModel> list) {
-    int j = 0, h = 0, o = 0;
+    int j = 0,
+        h = 0,
+        o = 0;
     for (final e in list) {
       switch (e.type.toLowerCase()) {
-        case 'jacke': j++; break;
-        case 'hose': h++; break;
-        default: o++;
+        case 'jacke':
+          j++;
+          break;
+        case 'hose':
+          h++;
+          break;
+        default:
+          o++;
       }
     }
     return _EquipmentCounts(jackets: j, pants: h, other: o);
@@ -251,7 +295,7 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
     final date = DateFormat('dd.MM.yyyy').format(m.startTime);
     final time = DateFormat('HH:mm').format(m.startTime);
     final cleaningEquipment =
-        _equipmentList.where((e) => e.status == EquipmentStatus.cleaning).toList();
+    _equipmentList.where((e) => e.status == EquipmentStatus.cleaning).toList();
     final counts = _countTypes(_equipmentList);
 
     return Scaffold(
@@ -290,7 +334,8 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
               // ── Einsatz-Typ Banner ─────────────────────────────────
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: tc.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
@@ -320,109 +365,112 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-                  // ── Einsatzdetails ─────────────────────────────────
-                  _sectionCard(
-                    icon: Icons.info_outline,
-                    title: 'Einsatzdetails',
-                    child: Column(
+              // ── Einsatzdetails ─────────────────────────────────
+              _sectionCard(
+                icon: Icons.info_outline,
+                title: 'Einsatzdetails',
+                child: Column(
+                  children: [
+                    _infoRow(Icons.local_fire_department,
+                        'Ortswehr', m.fireStation),
+                    if (m.involvedFireStations.isNotEmpty &&
+                        m.involvedFireStations.length > 1)
+                      _infoRow(Icons.group, 'Beteiligte',
+                          m.involvedFireStations.join(', ')),
+                    if (m.description.isNotEmpty)
+                      _infoRow(Icons.notes, 'Beschreibung',
+                          m.description),
+                    if (m.createdBy.isNotEmpty)
+                      _infoRow(Icons.person_outline,
+                          'Erfasst von', m.createdBy),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // ── Ausrüstungs-Statistik ──────────────────────────
+              _sectionCard(
+                icon: Icons.inventory_2_outlined,
+                title: 'Ausrüstung',
+                trailing: _equipmentList.isNotEmpty
+                    ? Text('${counts.total} Stück',
+                    style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 13))
+                    : null,
+                child: _equipmentList.isEmpty
+                    ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text('Noch keine Ausrüstung erfasst',
+                      style: TextStyle(
+                          color: Colors.grey.shade500)),
+                )
+                    : Column(
+                  children: [
+                    // Stat-Zeile
+                    Row(
                       children: [
-                        _infoRow(Icons.local_fire_department,
-                            'Ortswehr', m.fireStation),
-                        if (m.involvedFireStations.isNotEmpty &&
-                            m.involvedFireStations.length > 1)
-                          _infoRow(Icons.group, 'Beteiligte',
-                              m.involvedFireStations.join(', ')),
-                        if (m.description.isNotEmpty)
-                          _infoRow(Icons.notes, 'Beschreibung',
-                              m.description),
-                        if (m.createdBy.isNotEmpty)
-                          _infoRow(Icons.person_outline,
-                              'Erfasst von', m.createdBy),
+                        _statBox('Gesamt', counts.total,
+                            Icons.inventory, tc),
+                        const SizedBox(width: 8),
+                        _statBox('Jacken', counts.jackets,
+                            Icons.accessibility_new,
+                            Colors.blue.shade600),
+                        const SizedBox(width: 8),
+                        _statBox('Hosen', counts.pants,
+                            Icons.airline_seat_legroom_normal,
+                            Colors.amber.shade700),
                       ],
                     ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Ausrüstungs-Statistik ──────────────────────────
-                  _sectionCard(
-                    icon: Icons.inventory_2_outlined,
-                    title: 'Ausrüstung',
-                    trailing: _equipmentList.isNotEmpty
-                        ? Text('${counts.total} Stück',
-                            style: TextStyle(
-                                color: Colors.grey.shade500,
-                                fontSize: 13))
-                        : null,
-                    child: _equipmentList.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Text('Noch keine Ausrüstung erfasst',
-                                style: TextStyle(
-                                    color: Colors.grey.shade500)),
-                          )
-                        : Column(
-                            children: [
-                              // Stat-Zeile
-                              Row(
-                                children: [
-                                  _statBox('Gesamt', counts.total,
-                                      Icons.inventory, tc),
-                                  const SizedBox(width: 8),
-                                  _statBox('Jacken', counts.jackets,
-                                      Icons.accessibility_new,
-                                      Colors.blue.shade600),
-                                  const SizedBox(width: 8),
-                                  _statBox('Hosen', counts.pants,
-                                      Icons.airline_seat_legroom_normal,
-                                      Colors.amber.shade700),
-                                ],
-                              ),
-                              if (cleaningEquipment.isNotEmpty) ...[
-                                const SizedBox(height: 10),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.shade50,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: Colors.orange.shade200),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.local_laundry_service,
-                                          color: Colors.orange.shade700,
-                                          size: 16),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '${cleaningEquipment.length} in der Reinigung',
-                                        style: TextStyle(
-                                            color: Colors.orange.shade700,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                  ),
-
-                  // ── Ausrüstungsliste ───────────────────────────────
-                  if (_equipmentList.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _sectionCard(
-                      icon: Icons.list_alt,
-                      title: 'Kleidungsstücke',
-                      child: Column(
-                        children: _equipmentList
-                            .map((e) => _equipmentTile(e))
-                            .toList(),
+                    if (cleaningEquipment.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: Colors.orange.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.local_laundry_service,
+                                color: Colors.orange.shade700,
+                                size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${cleaningEquipment.length} in der Reinigung',
+                              style: TextStyle(
+                                  color: Colors.orange.shade700,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
+                ),
+              ),
+
+              // ── Ausrüstungsliste ───────────────────────────────
+              if (_equipmentList.isNotEmpty || _hiddenEquipmentCount > 0) ...[
+                const SizedBox(height: 12),
+                _sectionCard(
+                  icon: Icons.list_alt,
+                  title: 'Kleidungsstücke',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ..._equipmentList.map((e) => _equipmentTile(e)),
+                      if (_hiddenEquipmentCount > 0)
+                        _hiddenEquipmentHint(_hiddenEquipmentCount),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -446,7 +494,10 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
+          color: Theme
+              .of(context)
+              .colorScheme
+              .surface,
           border: Border(top: BorderSide(color: Colors.grey.shade200)),
           boxShadow: [
             BoxShadow(
@@ -463,7 +514,10 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
                 child: _bottomButton(
                   icon: Icons.nfc,
                   label: 'Kleidung erfassen',
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Theme
+                      .of(context)
+                      .colorScheme
+                      .primary,
                   onPressed: _addEquipmentByNfc,
                 ),
               ),
@@ -508,10 +562,10 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
       onPressed: onPressed,
       icon: isLoading
           ? const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white))
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(
+              strokeWidth: 2, color: Colors.white))
           : Icon(icon, size: 16),
       label: Text(label),
       style: ElevatedButton.styleFrom(
@@ -521,7 +575,7 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
             vertical: 12, horizontal: compact ? 14 : 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         textStyle:
-            const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     );
     return compact ? btn : btn;
@@ -549,7 +603,10 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
               children: [
                 Icon(icon,
                     size: 18,
-                    color: Theme.of(context).colorScheme.primary),
+                    color: Theme
+                        .of(context)
+                        .colorScheme
+                        .primary),
                 const SizedBox(width: 8),
                 Text(title,
                     style: const TextStyle(
@@ -612,7 +669,7 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
                     color: color)),
             Text(label,
                 style:
-                    TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                TextStyle(fontSize: 11, color: Colors.grey.shade500)),
           ],
         ),
       ),
@@ -625,19 +682,20 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
     final statusColor = isCleaning
         ? Colors.orange
         : isRepair
-            ? Colors.red
-            : Colors.green;
+        ? Colors.red
+        : Colors.green;
     final statusLabel = isCleaning
         ? 'Reinigung'
         : isRepair
-            ? 'Reparatur'
-            : 'Bereit';
+        ? 'Reparatur'
+        : 'Bereit';
 
     return InkWell(
-      onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => EquipmentDetailScreen(equipment: e))),
+      onTap: () =>
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => EquipmentDetailScreen(equipment: e))),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -646,7 +704,7 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
             CircleAvatar(
               radius: 18,
               backgroundColor:
-                  e.type == 'Jacke' ? Colors.blue.shade50 : Colors.amber.shade50,
+              e.type == 'Jacke' ? Colors.blue.shade50 : Colors.amber.shade50,
               child: Icon(
                 e.type == 'Jacke'
                     ? Icons.accessibility_new
@@ -673,12 +731,12 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
             ),
             Container(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: statusColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
                 border:
-                    Border.all(color: statusColor.withOpacity(0.3)),
+                Border.all(color: statusColor.withOpacity(0.3)),
               ),
               child: Text(statusLabel,
                   style: TextStyle(
@@ -694,8 +752,36 @@ class _MissionDetailScreenState extends State<MissionDetailScreen> {
       ),
     );
   }
-}
 
+
+  Widget _hiddenEquipmentHint(int count) {
+    final cs = Theme
+        .of(context)
+        .colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        child: Row(children: [
+          Icon(Icons.info_outline, size: 15, color: cs.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$count ${count == 1 ? 'Kleidungsstück' : 'Kleidungsstücke'} '
+                  'aus anderen Ortswehren (keine Berechtigung)',
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
 class _EquipmentCounts {
   final int jackets, pants, other;
   const _EquipmentCounts(

@@ -132,7 +132,12 @@ class _MissionSendToCleaningScreenState
     // Entweder alle oder keiner — kein inkonsistenter Zwischenzustand möglich.
     final ids = _selectedEquipment.map((e) => e.id).toList();
     try {
-      await _equipmentService.updateStatusBatch(ids, EquipmentStatus.cleaning);
+      await Future.wait([
+        // Status auf "cleaning" setzen
+        _equipmentService.updateStatusBatch(ids, EquipmentStatus.cleaning),
+        // equipmentIds in der Mission eintragen (für Dashboard-Verknüpfung)
+        _missionService.addEquipmentToMission(widget.missionId, ids),
+      ]);
     } catch (e) {
       // Batch komplett fehlgeschlagen → kein einziger Status wurde geändert
       if (mounted) {
